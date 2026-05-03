@@ -22,6 +22,13 @@ public class Message {
     private String nonce;   // NEW FIELD
 
     private LocalDateTime timestamp;
+    @Enumerated(EnumType.STRING)
+    private MessageStatus status;
+
+    @Enumerated(EnumType.STRING)
+    private TransportType transport;
+
+    private int retryCount;
 
     public Message() {
         this.timestamp = LocalDateTime.now();
@@ -49,4 +56,12 @@ public class Message {
     public void setTimestamp(LocalDateTime timestamp) {
         this.timestamp = timestamp;
     }
+    public MessageStatus getStatus() { return status; }
+    public void setStatus(MessageStatus status) { this.status = status; }
+
+    public TransportType getTransport() { return transport; }
+    public void setTransport(TransportType transport) { this.transport = transport; }
+
+    public int getRetryCount() { return retryCount; }
+    public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
 }

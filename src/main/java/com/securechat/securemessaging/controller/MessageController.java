@@ -30,6 +30,11 @@ public class MessageController {
         return ResponseEntity.ok(
                 messageService.sendMessage(sender, request.getReceiver(), request.getContent()));
     }
+    @PostMapping("/ack")
+    public ResponseEntity<Void> ackMessage(@RequestParam int messageId) {
+        messageService.markAsDelivered(messageId);
+        return ResponseEntity.ok().build();
+    }
 
     /** Full conversation between the authenticated user and user2. */
     @GetMapping("/chat")

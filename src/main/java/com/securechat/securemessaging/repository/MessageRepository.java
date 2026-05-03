@@ -1,5 +1,5 @@
 package com.securechat.securemessaging.repository;
-
+import com.securechat.securemessaging.model.MessageStatus;
 import com.securechat.securemessaging.model.Message;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -11,7 +11,7 @@ import java.util.Optional;
 public interface MessageRepository extends JpaRepository<Message, Integer> {
 
     List<Message> findByReceiver(String receiver);
-
+    List<Message> findByStatus(MessageStatus status);
     List<Message> findBySenderAndReceiverOrderByTimestampAsc(String sender, String receiver);
 
     boolean existsByNonce(String nonce);

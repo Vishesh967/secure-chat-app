@@ -1,5 +1,6 @@
 package com.securechat.securemessaging.service;
-
+import org.springframework.scheduling.annotation.Scheduled;
+import com.securechat.securemessaging.model.MessageStatus;
 import com.securechat.securemessaging.dto.ConversationPreview;
 import com.securechat.securemessaging.dto.MessageResponse;
 import com.securechat.securemessaging.model.Message;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+
 @Service
 public class MessageService {
 
@@ -23,11 +25,19 @@ public class MessageService {
     private static final String HMAC_KEY = "1234567890123456";
 
     private final MessageRepository messageRepository;
+    private final MessageRouter router;
 
-    public MessageService(MessageRepository messageRepository) {
+    public MessageService(MessageRepository messageRepository, MessageRouter router) {
         this.messageRepository = messageRepository;
+        this.router = router;
     }
-
+    public void markAsDelivered(int messageId) {
+        Message msg = messageRepository.findById(messageId).orElse(null);
+        if (msg != null) {
+            msg.setStatus(MessageStatus.DELIVERED);
+            messageRepository.save(msg);
+        }
+    }
     /**
      * Encrypts the content, generates a nonce and HMAC, then persists the message.
      */
@@ -35,6 +45,9 @@ public class MessageService {
         Message message = new Message();
         message.setSender(sender);
         message.setReceiver(receiver);
+        message.setTransport(router.decideRoute());
+        message.setStatus(MessageStatus.PENDING);
+        message.setRetryCount(0);
 
         try {
             String encrypted = AESUtil.encrypt(content);
@@ -53,8 +66,12 @@ public class MessageService {
 
         Message saved = messageRepository.save(message);
         return toResponse(saved, content);
-    }
 
+    }
+    @Scheduled(fixedDelay = 5000)
+    public void autoRetry() {
+        retryPendingMessages();
+    }
     /**
      * Returns the full conversation between two users, decrypted and sorted by time.
      */
@@ -71,6 +88,22 @@ public class MessageService {
         return all.stream()
                 .map(this::decryptAndMap)
                 .collect(Collectors.toList());
+    }
+    public void retryPendingMessages() {
+        List<Message> pending = messageRepository.findByStatus(MessageStatus.PENDING);
+
+        for (Message msg : pending) {
+            try {
+                // For now: simulate delivery
+                if (msg.getStatus() != MessageStatus.DELIVERED) {
+                    msg.setStatus(MessageStatus.SENT);
+                }
+                messageRepository.save(msg);
+            } catch (Exception e) {
+                msg.setRetryCount(msg.getRetryCount() + 1);
+                messageRepository.save(msg);
+            }
+        }
     }
 
     /**
