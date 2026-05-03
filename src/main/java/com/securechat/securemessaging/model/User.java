@@ -21,6 +21,7 @@ public class User {
     private String passwordHash;
 
     @Lob
+    @Column(columnDefinition = "BLOB")
     private byte[] publicKey;
 
     // ── Email verification ────────────────────────────────────

@@ -3,7 +3,7 @@
    JWT auth · Email OTP · DM · Group Chat · Image Sharing
    ============================================================ */
 
-const API = 'http://localhost:8080';
+const BASE_URL = window.location.origin;
 
 // ── Shared helpers ────────────────────────────────────────────
 function getToken() { return localStorage.getItem('sc_token'); }
@@ -119,7 +119,7 @@ if (isIndex) {
     if (!ok) return;
     setLoading('loginBtn', true);
     try {
-      const res  = await fetch(`${API}/auth/login`, {
+      const res  = await fetch(`${BASE_URL}/auth/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
@@ -163,7 +163,7 @@ if (isIndex) {
 
     setLoading('registerBtn', true);
     try {
-      const res  = await fetch(`${API}/auth/register`, {
+      const res  = await fetch(`${BASE_URL}/auth/register`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email, password })
       });
@@ -188,7 +188,7 @@ if (isIndex) {
     }
     setLoading('otpBtn', true);
     try {
-      const res  = await fetch(`${API}/auth/verify-otp`, {
+      const res  = await fetch(`${BASE_URL}/auth/verify-otp`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: pendingEmail, otp })
       });
@@ -212,7 +212,7 @@ if (isIndex) {
     btn.disabled = true;
     btn.textContent = 'Sending…';
     try {
-      const res  = await fetch(`${API}/auth/resend-otp`, {
+      const res  = await fetch(`${BASE_URL}/auth/resend-otp`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: pendingEmail })
       });
@@ -277,6 +277,9 @@ if (isChat) {
   if (!getToken()) { window.location.href = 'index.html'; }
 
   const ME = getUser();
+  const ACTIVE_DM_KEY = `sc_active_dm_${ME}`;
+  const KNOWN_USERS_KEY = 'knownUsers';
+  const conversations = {};
 
   // ── DOM refs ───────────────────────────────────────────────
   const loggedInUserEl = document.getElementById('loggedInUser');
@@ -308,7 +311,9 @@ if (isChat) {
   // ── Init ───────────────────────────────────────────────────
   loggedInUserEl.textContent = ME;
   avatarEl.textContent       = initials(ME);
-  loadSidebar();
+  allDmPreviews = mergeKnownUsers([]);
+  renderDmList(allDmPreviews);
+  loadSidebar().then(restoreActiveDm);
 
   // ── Sidebar bootstrap ──────────────────────────────────────
   async function loadSidebar() {
@@ -317,17 +322,20 @@ if (isChat) {
 
   async function loadDmPreviews() {
     try {
-      const res = await fetch(`${API}/messages/previews`, { headers: authHeaders() });
+      const res = await fetch(`${BASE_URL}/messages/previews`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (!res.ok) return;
-      allDmPreviews = await res.json();
+      allDmPreviews = mergeKnownUsers(normalizeDmPreviews(await res.json()));
       renderDmList(allDmPreviews);
+      if (activeType === 'dm' && activeTarget) {
+        chatHeaderName.textContent = activeTarget;
+      }
     } catch { /* silent */ }
   }
 
   async function loadGroups() {
     try {
-      const res = await fetch(`${API}/groups`, { headers: authHeaders() });
+      const res = await fetch(`${BASE_URL}/groups`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (!res.ok) return;
       allGroups = await res.json();
@@ -336,13 +344,51 @@ if (isChat) {
   }
 
   // ── Sidebar rendering ──────────────────────────────────────
+  function normalizeDmPreviews(previews) {
+    return (previews || []).filter(p => p && p.name && p.name !== ME);
+  }
+
+  function loadKnownUsers() {
+    return JSON.parse(localStorage.getItem(KNOWN_USERS_KEY) || '[]')
+      .filter(name => name && name !== ME);
+  }
+
+  function saveKnownUsers(users) {
+    localStorage.setItem(KNOWN_USERS_KEY, JSON.stringify([...new Set(users.filter(name => name && name !== ME))]));
+  }
+
+  function rememberKnownUser(username) {
+    saveKnownUsers([...loadKnownUsers(), username]);
+  }
+
+  function mergeKnownUsers(previews) {
+    const byName = new Map();
+    normalizeDmPreviews(previews).forEach(p => byName.set(p.name, p));
+    loadKnownUsers().forEach(name => {
+      if (!byName.has(name)) {
+        byName.set(name, { name, lastMessage: '', lastMessageTime: null });
+      }
+    });
+    saveKnownUsers([...byName.keys()]);
+    return [...byName.values()];
+  }
+
+  function withActiveDmPreview(previews) {
+    const items = [...(previews || [])];
+    if (activeType === 'dm' && activeTarget && !items.some(p => p.name === activeTarget)) {
+      items.unshift({ name: activeTarget, lastMessage: '', lastMessageTime: null });
+    }
+    return items;
+  }
+
   function renderDmList(previews) {
-    if (!previews || previews.length === 0) {
+    const items = withActiveDmPreview(previews);
+    if (items.length === 0) {
       dmListEl.innerHTML = '<p class="sidebar-hint">No conversations yet</p>';
       return;
     }
     dmListEl.innerHTML = '';
-    previews.forEach(p => {
+    items.forEach(p => {
       dmListEl.appendChild(makeSidebarItem({
         avatarText: initials(p.name),
         avatarClass: '',
@@ -404,21 +450,36 @@ if (isChat) {
     activeType     = 'dm';
     activeTarget   = username;
     activeGroupObj = null;
+    localStorage.setItem(ACTIVE_DM_KEY, username);
+    rememberKnownUser(username);
+    allDmPreviews = mergeKnownUsers(allDmPreviews);
 
     chatAvatarEl.className   = 'chat-header-avatar';
     chatAvatarEl.textContent = initials(username);
     chatHeaderName.textContent = username;
-    chatHeaderSub.innerHTML  = '<span style="color:var(--green-600)">&#9679;</span> Secure channel · AES-128 CBC';
+    chatHeaderSub.textContent  = 'Secure channel - AES-128 CBC';
     chatHeaderActs.innerHTML = `<span class="enc-badge">&#128274; DM</span>`;
 
     showActiveChat();
     renderDmList(allDmPreviews);
     renderGroupList(allGroups);
 
-    messagesArea.innerHTML = '<div class="msg-status">Loading…</div>';
-    await fetchAndRenderDm();
-    pollingTimer = setInterval(() => fetchAndRenderDm(true), 3000);
+    if (conversations[username]) {
+      lastMsgCount = conversations[username].length;
+      renderMessages(conversations[username], false);
+    } else {
+      messagesArea.innerHTML = '<div class="msg-status">Loading…</div>';
+      await fetchAndRenderDm(username);
+    }
+    pollingTimer = setInterval(() => fetchAndRenderDm(username, true), 3000);
     messageInput.focus();
+  }
+
+  async function restoreActiveDm() {
+    const username = localStorage.getItem(ACTIVE_DM_KEY);
+    if (username && username !== ME) {
+      await openDm(username);
+    }
   }
 
   // ── Open Group ─────────────────────────────────────────────
@@ -463,17 +524,26 @@ if (isChat) {
   }
 
   // ── Fetch & render: DM (text + images merged) ──────────────
-  async function fetchAndRenderDm(silent = false) {
+  async function fetchAndRenderDm(userOrSilent = activeTarget, silent = false) {
+    let user = userOrSilent || activeTarget;
+    if (typeof userOrSilent === 'boolean') {
+      silent = userOrSilent;
+      user = activeTarget;
+    }
+    if (!user) return;
+
     try {
       const [textRes, imgRes] = await Promise.all([
-        fetch(`${API}/messages/chat?user2=${encodeURIComponent(activeTarget)}`, { headers: authHeaders() }),
-        fetch(`${API}/images/dm?user2=${encodeURIComponent(activeTarget)}`,     { headers: authHeaders() })
+        fetch(`${BASE_URL}/messages/chat?user2=${encodeURIComponent(user)}`, { headers: authHeaders() }),
+        fetch(`${BASE_URL}/images/dm?user2=${encodeURIComponent(user)}`,     { headers: authHeaders() })
       ]);
-      if (textRes.status === 401) { handleUnauthorized(); return; }
+      if (textRes.status === 401 || imgRes.status === 401) { handleUnauthorized(); return; }
       if (!textRes.ok) { if (!silent) messagesArea.innerHTML = '<div class="msg-status">Failed to load</div>'; return; }
       const textMsgs = await textRes.json();
       const imgMsgs  = imgRes.ok ? await imgRes.json() : [];
       const merged   = mergeAndSort(textMsgs, imgMsgs);
+      conversations[user] = merged;
+      if (activeType !== 'dm' || activeTarget !== user) return;
       if (silent && merged.length === lastMsgCount) return;
       lastMsgCount = merged.length;
       renderMessages(merged, false);
@@ -485,10 +555,10 @@ if (isChat) {
   async function fetchAndRenderGroup(silent = false) {
     try {
       const [textRes, imgRes] = await Promise.all([
-        fetch(`${API}/groups/${activeTarget}/messages`, { headers: authHeaders() }),
-        fetch(`${API}/images/group/${activeTarget}`,    { headers: authHeaders() })
+        fetch(`${BASE_URL}/groups/${activeTarget}/messages`, { headers: authHeaders() }),
+        fetch(`${BASE_URL}/images/group/${activeTarget}`,    { headers: authHeaders() })
       ]);
-      if (textRes.status === 401) { handleUnauthorized(); return; }
+      if (textRes.status === 401 || imgRes.status === 401) { handleUnauthorized(); return; }
       if (!textRes.ok) { if (!silent) messagesArea.innerHTML = '<div class="msg-status">Failed to load</div>'; return; }
       const textMsgs = await textRes.json();
       const imgMsgs  = imgRes.ok ? await imgRes.json() : [];
@@ -600,12 +670,12 @@ if (isChat) {
     try {
       let res;
       if (activeType === 'dm') {
-        res = await fetch(`${API}/messages/send`, {
+        res = await fetch(`${BASE_URL}/messages/send`, {
           method: 'POST', headers: authHeaders(),
           body: JSON.stringify({ receiver: activeTarget, content })
         });
       } else {
-        res = await fetch(`${API}/groups/${activeTarget}/messages`, {
+        res = await fetch(`${BASE_URL}/groups/${activeTarget}/messages`, {
           method: 'POST', headers: authHeaders(),
           body: JSON.stringify({ content })
         });
@@ -682,13 +752,13 @@ if (isChat) {
       let res;
       if (activeType === 'dm') {
         formData.append('receiver', activeTarget);
-        res = await fetch(`${API}/images/dm/send`, {
+        res = await fetch(`${BASE_URL}/images/dm/send`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${getToken()}` },
           body: formData
         });
       } else {
-        res = await fetch(`${API}/images/group/${activeTarget}/send`, {
+        res = await fetch(`${BASE_URL}/images/group/${activeTarget}/send`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${getToken()}` },
           body: formData
@@ -751,7 +821,7 @@ if (isChat) {
     nameErr.textContent = '';
     if (!name || name.length < 2) { nameErr.textContent = 'Group name must be at least 2 characters'; return; }
     try {
-      const res = await fetch(`${API}/groups`, {
+      const res = await fetch(`${BASE_URL}/groups`, {
         method: 'POST', headers: authHeaders(),
         body: JSON.stringify({ name, members })
       });
@@ -781,7 +851,7 @@ if (isChat) {
       errEl.textContent = '';
       if (!username) { errEl.textContent = 'Username is required'; return; }
       try {
-        const res = await fetch(`${API}/groups/${groupId}/members`, {
+        const res = await fetch(`${BASE_URL}/groups/${groupId}/members`, {
           method: 'POST', headers: authHeaders(),
           body: JSON.stringify({ username })
         });
@@ -803,7 +873,7 @@ if (isChat) {
   async function leaveGroup(groupId) {
     if (!confirm('Leave this group?')) return;
     try {
-      const res = await fetch(`${API}/groups/${groupId}/leave`, {
+      const res = await fetch(`${BASE_URL}/groups/${groupId}/leave`, {
         method: 'DELETE', headers: authHeaders()
       });
       if (res.ok || res.status === 204) {
@@ -856,8 +926,7 @@ if (isChat) {
 
   function handleUnauthorized() {
     stopPolling();
-    localStorage.removeItem('sc_token');
-    localStorage.removeItem('sc_user');
+    localStorage.clear();
     window.location.href = 'index.html';
   }
 
@@ -878,91 +947,17 @@ if (isChat) {
     setTimeout(() => t.remove(), 3200);
   }
 
-  // ── LAN Discovery ──────────────────────────────────────────
-
-  let lanInfo = null;
-
-  async function loadLanInfo() {
-    try {
-      const res = await fetch(`${API}/lan/info`);
-      if (!res.ok) return;
-      lanInfo = await res.json();
-      updateLanUI(lanInfo);
-    } catch { /* silent — LAN info is non-critical */ }
-  }
-
-  function updateLanUI(info) {
-    const dot      = document.getElementById('lanDot');
-    const text     = document.getElementById('lanStatusText');
-    const urlBox   = document.getElementById('lanUrlBox');
-    const urlText  = document.getElementById('lanUrlText');
-
-    if (!dot || !text) return;
-
-    if (info.mode === 'LAN') {
-      dot.className  = 'lan-dot lan-dot-online';
-      text.textContent = `On LAN · ${info.lanIp}`;
-      urlBox.style.display = 'flex';
-      urlText.textContent  = info.lanUrl;
-    } else {
-      dot.className  = 'lan-dot lan-dot-local';
-      text.textContent = 'Localhost only';
-      urlBox.style.display = 'none';
-    }
-  }
-
-  // LAN info button → open modal
-  const btnLanInfo = document.getElementById('btnLanInfo');
-  if (btnLanInfo) {
-    btnLanInfo.addEventListener('click', () => {
-      if (!lanInfo) { showToast('LAN info not available yet', 'error'); return; }
-      document.getElementById('modalLanIp').textContent   = lanInfo.lanIp;
-      document.getElementById('modalLanPort').textContent = lanInfo.port;
-      document.getElementById('modalLanMode').textContent = lanInfo.mode;
-      document.getElementById('modalLanUrl').textContent  = lanInfo.lanUrl;
-      generateQr(lanInfo.lanUrl);
-      openModal('modalLanInfo');
-    });
-  }
-
-  // Copy LAN URL buttons
-  const btnCopyLan = document.getElementById('btnCopyLan');
-  if (btnCopyLan) {
-    btnCopyLan.addEventListener('click', () => {
-      if (lanInfo) { navigator.clipboard.writeText(lanInfo.lanUrl).then(() => showToast('URL copied!')); }
-    });
-  }
-  const btnCopyLanModal = document.getElementById('btnCopyLanModal');
-  if (btnCopyLanModal) {
-    btnCopyLanModal.addEventListener('click', () => {
-      if (lanInfo) { navigator.clipboard.writeText(lanInfo.lanUrl).then(() => showToast('URL copied!')); }
-    });
-  }
-
-  // Simple QR code generator (no external library — pure canvas)
-  function generateQr(text) {
-    const canvas = document.getElementById('lanQrCanvas');
-    if (!canvas) return;
-    const wrap = document.getElementById('lanQrWrap');
-
-    // Use the browser's built-in QR via a data URL approach
-    // We'll use a free public QR API that works offline via URL encoding
-    // Since we can't use external libs, we render a placeholder with the URL
-    // and instruct users to use the URL directly.
-    // For a real QR, integrate qrcode.js — shown as a note below.
-    wrap.style.display = 'none'; // Hide QR section — URL is sufficient
-  }
-
-  // Load LAN info on page load
-  loadLanInfo();
-
   // ── Logout ─────────────────────────────────────────────────
   document.getElementById('logoutBtn').addEventListener('click', () => {
     stopPolling();
-    localStorage.removeItem('sc_token');
-    localStorage.removeItem('sc_user');
+    localStorage.clear();
     window.location.href = 'index.html';
   });
 
   window.addEventListener('beforeunload', stopPolling);
+}
+const username = localStorage.getItem("username");
+
+if (username) {
+    document.getElementById("current-user").innerText = username;
 }

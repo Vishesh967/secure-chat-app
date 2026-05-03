@@ -86,32 +86,6 @@
         </div>
       </div>
 
-      <!-- LAN Section -->
-      <div class="sidebar-section sidebar-section-lan">
-        <div class="sidebar-section-header">
-          <span>&#128225; LAN / Wi-Fi</span>
-          <button class="btn-new-dm" id="btnLanInfo" title="LAN connection info">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-          </button>
-        </div>
-        <div class="lan-status-bar" id="lanStatusBar">
-          <div class="lan-dot" id="lanDot"></div>
-          <span id="lanStatusText">Detecting…</span>
-        </div>
-        <div class="lan-url-box" id="lanUrlBox" style="display:none">
-          <span id="lanUrlText"></span>
-          <button class="btn-copy-lan" id="btnCopyLan" title="Copy URL">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-            </svg>
-          </button>
-        </div>
-        <p class="sidebar-hint lan-hint">Other devices on the same Wi-Fi can connect using the URL above.</p>
-      </div>
-
     </aside>
 
     <!-- ── Chat Main ────────────────────────────────────────── -->
@@ -315,57 +289,10 @@
       </div>
     </div>
   </div>
-
-  <!-- ── LAN Info Modal ──────────────────────────────────── -->
-  <div id="modalLanInfo" class="modal-overlay sc-hidden">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>&#128225; LAN / Wi-Fi Access</h3>
-        <button class="modal-close" data-close="modalLanInfo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="lan-modal-info">
-          <div class="lan-modal-row">
-            <span class="lan-modal-label">Server IP</span>
-            <span class="lan-modal-value" id="modalLanIp">—</span>
-          </div>
-          <div class="lan-modal-row">
-            <span class="lan-modal-label">Port</span>
-            <span class="lan-modal-value" id="modalLanPort">—</span>
-          </div>
-          <div class="lan-modal-row">
-            <span class="lan-modal-label">Mode</span>
-            <span class="lan-modal-value" id="modalLanMode">—</span>
-          </div>
-          <div class="lan-modal-row">
-            <span class="lan-modal-label">Full URL</span>
-            <span class="lan-modal-value lan-modal-url" id="modalLanUrl">—</span>
-          </div>
-        </div>
-        <div class="lan-modal-qr" id="lanQrWrap">
-          <canvas id="lanQrCanvas"></canvas>
-          <p class="lan-qr-hint">Scan with another device on the same Wi-Fi</p>
-        </div>
-        <div class="lan-modal-steps">
-          <p><strong>How to connect from another device:</strong></p>
-          <ol>
-            <li>Connect the other device to the <strong>same Wi-Fi</strong> network</li>
-            <li>Open a browser and go to the URL shown above</li>
-            <li>Register or log in — messages are end-to-end encrypted</li>
-          </ol>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-modal-cancel" data-close="modalLanInfo">Close</button>
-        <button class="btn-modal-ok" id="btnCopyLanModal">Copy URL</button>
-      </div>
-    </div>
+  <div id="user-info" class="user-info">
+    <span id="current-user"></span>
+    <button onclick="logout()">Logout</button>
   </div>
-
   <script src="script.js"></script>
 </body>
 </html>

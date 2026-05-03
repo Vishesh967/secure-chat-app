@@ -15,15 +15,9 @@ import org.springframework.stereotype.Service;
 import com.securechat.securemessaging.service.PeerService;
 import com.securechat.securemessaging.model.TransportType;
 import com.securechat.securemessaging.repository.UserRepository;
-import com.securechat.securemessaging.model.User;
-import com.securechat.securemessaging.security.ECDHUtil;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-import java.security.*;
-import java.security.spec.X509EncodedKeySpec;
-import javax.crypto.SecretKey;
 
 @Service
 public class MessageService {
@@ -36,8 +30,6 @@ public class MessageService {
     private final SimpMessagingTemplate messagingTemplate;
     private final PeerService peerService;
     private final UserRepository userRepository;
-
-    private final Map<String, PrivateKey> keyStore = new ConcurrentHashMap<>();
 
     public MessageService(MessageRepository messageRepository,
                           MessageRouter router,
@@ -61,50 +53,43 @@ public class MessageService {
     }
 
     public MessageResponse sendMessage(String sender, String receiver, String content) {
+
         Message message = new Message();
         message.setSender(sender);
         message.setReceiver(receiver);
+
+        // Decide transport (LAN / INTERNET / OFFLINE)
         message.setTransport(router.decideRoute());
 
+        // LAN security check
         if (message.getTransport() == TransportType.LAN) {
             if (!peerService.isTrusted(receiver)) {
                 throw new RuntimeException("Untrusted peer");
             }
         }
 
+        // Initial message state
         message.setStatus(MessageStatus.PENDING);
         message.setRetryCount(0);
 
+        // Ensure receiver exists
+        userRepository.findByUsername(receiver)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
         try {
-            User receiverUser = userRepository.findByUsername(receiver)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
-
-            PublicKey receiverPublicKey = KeyFactory.getInstance("EC")
-                    .generatePublic(new X509EncodedKeySpec(receiverUser.getPublicKey()));
-
-            KeyPair ephemeralKeyPair = ECDHUtil.generateKeyPair();
-
-            // store sender private key for later decryption
-            keyStore.put(sender, ephemeralKeyPair.getPrivate());
-
-            SecretKey sessionKey = ECDHUtil.deriveSharedKey(
-                    ephemeralKeyPair.getPrivate(),
-                    receiverPublicKey
-            );
-
-            String encrypted = AESUtil.encryptWithKey(content, sessionKey);
-
-            message.setSenderEphemeralPublicKey(
-                    ephemeralKeyPair.getPublic().getEncoded()
-            );
-
+            // Encrypt message
+            String encrypted = AESUtil.encrypt(content);
             message.setContent(encrypted);
 
+            // Generate unique nonce
             String nonce;
-            do { nonce = UUID.randomUUID().toString(); }
-            while (messageRepository.existsByNonce(nonce));
+            do {
+                nonce = UUID.randomUUID().toString();
+            } while (messageRepository.existsByNonce(nonce));
 
             message.setNonce(nonce);
+
+            // Generate HMAC for integrity
             message.setHmac(HMACUtil.generateHMAC(encrypted, HMAC_KEY));
 
         } catch (Exception e) {
@@ -112,11 +97,13 @@ public class MessageService {
             throw new RuntimeException("Encryption error");
         }
 
+        // Save to DB
         Message saved = messageRepository.save(message);
 
+        // Send real-time message (WebSocket)
         messagingTemplate.convertAndSend(
                 "/topic/messages/" + receiver,
-                toResponse(saved, content)
+                toResponse(saved, content)   // sending plaintext for UI (correct in your flow)
         );
 
         return toResponse(saved, content);
@@ -173,20 +160,7 @@ public class MessageService {
                 return toResponse(msg, "[integrity check failed]");
             }
 
-            PrivateKey receiverPrivateKey = keyStore.get(msg.getReceiver());
-            if (receiverPrivateKey == null) {
-                return toResponse(msg, "[key missing]");
-            }
-
-            PublicKey senderPublicKey = KeyFactory.getInstance("EC")
-                    .generatePublic(new X509EncodedKeySpec(msg.getSenderEphemeralPublicKey()));
-
-            SecretKey sessionKey = ECDHUtil.deriveSharedKey(
-                    receiverPrivateKey,
-                    senderPublicKey
-            );
-
-            String decrypted = AESUtil.decryptWithKey(msg.getContent(), sessionKey);
+            String decrypted = AESUtil.decrypt(msg.getContent());
 
             return toResponse(msg, decrypted);
 
