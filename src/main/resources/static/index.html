@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>SecureChat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+
+  <div class="auth-wrapper">
+
+    <!-- Brand -->
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <h1 class="brand-name">SecureChat</h1>
+      <p class="brand-tagline">End-to-end encrypted messaging</p>
+    </div>
+
+    <!-- Auth Card -->
+    <div class="auth-card">
+
+      <!-- Tabs -->
+      <div class="auth-tabs" role="tablist">
+        <button id="tabLogin"    class="auth-tab active" role="tab">Sign In</button>
+        <button id="tabRegister" class="auth-tab"        role="tab">Create Account</button>
+      </div>
+
+      <!-- LOGIN PANEL -->
+      <div id="panelLogin" class="auth-panel active">
+        <form id="loginForm" novalidate>
+          <div class="field">
+            <label for="loginUsername">Username</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input id="loginUsername" type="text" placeholder="Your username" autocomplete="username" autocapitalize="none" spellcheck="false" />
+            </div>
+            <span class="field-error" id="loginUsernameErr"></span>
+          </div>
+          <div class="field">
+            <label for="loginPassword">Password</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input id="loginPassword" type="password" placeholder="Your password" autocomplete="current-password" />
+              <button type="button" class="toggle-pw" data-target="loginPassword">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+            <span class="field-error" id="loginPasswordErr"></span>
+          </div>
+          <div id="loginAlert" class="alert" role="alert" aria-live="polite"></div>
+          <button type="submit" class="btn-primary" id="loginBtn">
+            <span class="btn-text">Sign In</span>
+            <span class="btn-spinner sc-hidden"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span>
+          </button>
+        </form>
+      </div>
+
+      <!-- REGISTER PANEL -->
+      <div id="panelRegister" class="auth-panel">
+        <form id="registerForm" novalidate>
+          <div class="field">
+            <label for="regUsername">Username</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <input id="regUsername" type="text" placeholder="3–30 chars, letters/numbers/_" autocomplete="username" autocapitalize="none" spellcheck="false" />
+            </div>
+            <span class="field-error" id="regUsernameErr"></span>
+          </div>
+          <div class="field">
+            <label for="regEmail">Email</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              <input id="regEmail" type="email" placeholder="you@example.com" autocomplete="email" autocapitalize="none" spellcheck="false" />
+            </div>
+            <span class="field-error" id="regEmailErr"></span>
+          </div>
+          <div class="field">
+            <label for="regPassword">Password</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input id="regPassword" type="password" placeholder="At least 8 characters" autocomplete="new-password" />
+              <button type="button" class="toggle-pw" data-target="regPassword">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+            <span class="field-error" id="regPasswordErr"></span>
+          </div>
+          <div class="field">
+            <label for="regConfirm">Confirm Password</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <input id="regConfirm" type="password" placeholder="Repeat your password" autocomplete="new-password" />
+            </div>
+            <span class="field-error" id="regConfirmErr"></span>
+          </div>
+          <div id="registerAlert" class="alert" role="alert" aria-live="polite"></div>
+          <button type="submit" class="btn-primary" id="registerBtn">
+            <span class="btn-text">Create Account</span>
+            <span class="btn-spinner sc-hidden"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span>
+          </button>
+        </form>
+      </div>
+
+      <!-- OTP PANEL -->
+      <div id="panelOtp" class="auth-panel">
+        <div class="otp-header">
+          <div class="otp-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <h3>Check your email</h3>
+          <p id="otpSubtitle">We sent a 6-digit code to your email address.</p>
+        </div>
+        <form id="otpForm" novalidate>
+          <div class="field">
+            <label for="otpCode">Verification Code</label>
+            <div class="otp-input-wrap">
+              <input id="otpCode" type="text" inputmode="numeric" pattern="[0-9]*"
+                     maxlength="6" placeholder="000000" autocomplete="one-time-code" />
+            </div>
+            <span class="field-error" id="otpCodeErr"></span>
+          </div>
+          <div id="otpAlert" class="alert" role="alert" aria-live="polite"></div>
+          <button type="submit" class="btn-primary" id="otpBtn">
+            <span class="btn-text">Verify &amp; Activate</span>
+            <span class="btn-spinner sc-hidden"><svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span>
+          </button>
+          <div class="otp-resend">
+            Didn't receive it?
+            <button type="button" id="resendOtpBtn" class="btn-link">Resend code</button>
+          </div>
+        </form>
+      </div>
+
+    </div><!-- /auth-card -->
+
+    <!-- Security badges -->
+    <div class="security-badges">
+      <span class="badge">&#128274; AES-128 CBC</span>
+      <span class="badge">&#128273; Diffie-Hellman</span>
+      <span class="badge">&#9989; HMAC-SHA256</span>
+      <span class="badge">&#128231; Email Verified</span>
+    </div>
+
+  </div><!-- /auth-wrapper -->
+
+  <script src="script.js"></script>
+</body>
+</html>

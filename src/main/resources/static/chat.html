@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>SecureChat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="chat-page">
+
+  <!-- ── Top Bar ─────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <span class="topbar-title">SecureChat</span>
+      <span class="topbar-badge">&#128274; E2E Encrypted</span>
+    </div>
+    <div class="topbar-right">
+      <div class="topbar-user">
+        <div class="avatar" id="avatarEl"></div>
+        <span id="loggedInUser" class="topbar-username"></span>
+      </div>
+      <button id="logoutBtn" class="btn-logout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Sign Out
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main Layout ─────────────────────────────────────── -->
+  <div class="chat-layout">
+
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside class="chat-sidebar">
+
+      <!-- Search -->
+      <div class="sidebar-search-wrap">
+        <div class="sidebar-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input id="searchInput" type="text" placeholder="Search or start new chat…"
+                 autocomplete="off" autocapitalize="none" spellcheck="false" />
+        </div>
+      </div>
+
+      <!-- DM Section -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-header">
+          <span>Direct Messages</span>
+          <button class="btn-new-dm" id="btnNewDm" title="New direct message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+        </div>
+        <div id="dmList" class="conv-list">
+          <p class="sidebar-hint">No conversations yet</p>
+        </div>
+      </div>
+
+      <!-- Groups Section -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-header">
+          <span>Groups</span>
+          <button class="btn-new-dm" id="btnNewGroup" title="Create group">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+        </div>
+        <div id="groupList" class="conv-list">
+          <p class="sidebar-hint">No groups yet</p>
+        </div>
+      </div>
+
+      <!-- LAN Section -->
+      <div class="sidebar-section sidebar-section-lan">
+        <div class="sidebar-section-header">
+          <span>&#128225; LAN / Wi-Fi</span>
+          <button class="btn-new-dm" id="btnLanInfo" title="LAN connection info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </button>
+        </div>
+        <div class="lan-status-bar" id="lanStatusBar">
+          <div class="lan-dot" id="lanDot"></div>
+          <span id="lanStatusText">Detecting…</span>
+        </div>
+        <div class="lan-url-box" id="lanUrlBox" style="display:none">
+          <span id="lanUrlText"></span>
+          <button class="btn-copy-lan" id="btnCopyLan" title="Copy URL">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+        </div>
+        <p class="sidebar-hint lan-hint">Other devices on the same Wi-Fi can connect using the URL above.</p>
+      </div>
+
+    </aside>
+
+    <!-- ── Chat Main ────────────────────────────────────────── -->
+    <main class="chat-main">
+
+      <!-- Empty state -->
+      <div id="emptyState" class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <h3>Select a conversation</h3>
+        <p>Choose a DM or group from the sidebar, or start a new one</p>
+      </div>
+
+      <!-- Active chat -->
+      <div id="activeChat" class="active-chat sc-hidden">
+
+        <!-- Chat header -->
+        <div class="chat-header">
+          <div class="chat-header-avatar" id="chatAvatarEl"></div>
+          <div class="chat-header-info">
+            <span class="chat-header-name" id="chatHeaderName"></span>
+            <span class="chat-header-sub" id="chatHeaderSub"></span>
+          </div>
+          <div class="chat-header-actions" id="chatHeaderActions"></div>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages-area" id="messagesArea"></div>
+
+        <!-- Composer -->
+        <div class="message-composer">
+          <label class="btn-attach" id="btnAttach" title="Send image" aria-label="Attach image">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <input id="imageFileInput" type="file" accept="image/jpeg,image/jpg,image/png,image/webp"
+                   style="display:none" />
+          </label>
+          <input id="messageInput" type="text" placeholder="Type a message…" autocomplete="off" />
+          <button id="sendBtn" class="btn-send" aria-label="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ── Image Preview Modal (before send) ────────────────── -->
+  <div id="modalImagePreview" class="modal-overlay sc-hidden">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3>Send Image</h3>
+        <button class="modal-close" data-close="modalImagePreview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="img-preview-wrap">
+          <img id="imgPreviewEl" src="" alt="Preview" class="img-preview" />
+        </div>
+        <div class="img-preview-meta" id="imgPreviewMeta"></div>
+        <div class="img-preview-enc">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Will be encrypted with AES-128 CBC before sending
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" data-close="modalImagePreview">Cancel</button>
+        <button class="btn-modal-ok" id="btnSendImage">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:4px">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          Send Encrypted
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Image Viewer Modal (after receive) ───────────────── -->
+  <div id="modalImageView" class="modal-overlay sc-hidden">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3 id="imgViewTitle">Image</h3>
+        <button class="modal-close" data-close="modalImageView">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="img-preview-wrap">
+          <img id="imgViewEl" src="" alt="Decrypted image" class="img-preview" />
+        </div>
+        <div class="img-view-meta" id="imgViewMeta"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" data-close="modalImageView">Close</button>
+        <a id="btnDownloadImage" class="btn-modal-ok" download>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:4px">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── New DM Modal ─────────────────────────────────────── -->
+  <div id="modalDm" class="modal-overlay sc-hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>New Direct Message</h3>
+        <button class="modal-close" data-close="modalDm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="dmUsername">Username</label>
+          <input id="dmUsername" type="text" placeholder="Enter username to chat with"
+                 autocapitalize="none" spellcheck="false" />
+          <span class="field-error" id="dmUsernameErr"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" data-close="modalDm">Cancel</button>
+        <button class="btn-modal-ok" id="btnDmOpen">Open Chat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Create Group Modal ───────────────────────────────── -->
+  <div id="modalGroup" class="modal-overlay sc-hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Create Group</h3>
+        <button class="modal-close" data-close="modalGroup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="groupName">Group Name</label>
+          <input id="groupName" type="text" placeholder="e.g. Project Alpha" maxlength="60" />
+          <span class="field-error" id="groupNameErr"></span>
+        </div>
+        <div class="field">
+          <label for="groupMembers">Add Members (comma-separated usernames)</label>
+          <input id="groupMembers" type="text" placeholder="alice, bob, carol"
+                 autocapitalize="none" spellcheck="false" />
+          <span class="field-error" id="groupMembersErr"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" data-close="modalGroup">Cancel</button>
+        <button class="btn-modal-ok" id="btnGroupCreate">Create Group</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Add Member Modal ─────────────────────────────────── -->
+  <div id="modalAddMember" class="modal-overlay sc-hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Add Member</h3>
+        <button class="modal-close" data-close="modalAddMember">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="addMemberUsername">Username</label>
+          <input id="addMemberUsername" type="text" placeholder="Username to add"
+                 autocapitalize="none" spellcheck="false" />
+          <span class="field-error" id="addMemberErr"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" data-close="modalAddMember">Cancel</button>
+        <button class="btn-modal-ok" id="btnAddMemberOk">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LAN Info Modal ──────────────────────────────────── -->
+  <div id="modalLanInfo" class="modal-overlay sc-hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>&#128225; LAN / Wi-Fi Access</h3>
+        <button class="modal-close" data-close="modalLanInfo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="lan-modal-info">
+          <div class="lan-modal-row">
+            <span class="lan-modal-label">Server IP</span>
+            <span class="lan-modal-value" id="modalLanIp">—</span>
+          </div>
+          <div class="lan-modal-row">
+            <span class="lan-modal-label">Port</span>
+            <span class="lan-modal-value" id="modalLanPort">—</span>
+          </div>
+          <div class="lan-modal-row">
+            <span class="lan-modal-label">Mode</span>
+            <span class="lan-modal-value" id="modalLanMode">—</span>
+          </div>
+          <div class="lan-modal-row">
+            <span class="lan-modal-label">Full URL</span>
+            <span class="lan-modal-value lan-modal-url" id="modalLanUrl">—</span>
+          </div>
+        </div>
+        <div class="lan-modal-qr" id="lanQrWrap">
+          <canvas id="lanQrCanvas"></canvas>
+          <p class="lan-qr-hint">Scan with another device on the same Wi-Fi</p>
+        </div>
+        <div class="lan-modal-steps">
+          <p><strong>How to connect from another device:</strong></p>
+          <ol>
+            <li>Connect the other device to the <strong>same Wi-Fi</strong> network</li>
+            <li>Open a browser and go to the URL shown above</li>
+            <li>Register or log in — messages are end-to-end encrypted</li>
+          </ol>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" data-close="modalLanInfo">Close</button>
+        <button class="btn-modal-ok" id="btnCopyLanModal">Copy URL</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
