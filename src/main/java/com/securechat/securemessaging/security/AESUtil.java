@@ -47,6 +47,18 @@ public class AESUtil {
 
         return Base64.getEncoder().encodeToString(combined);
     }
+    public static String encryptWithKey(String data, SecretKey key) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES");
+        cipher.init(Cipher.ENCRYPT_MODE, key);
+        return Base64.getEncoder().encodeToString(cipher.doFinal(data.getBytes()));
+    }
+
+    public static String decryptWithKey(String data, SecretKey key) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES");
+        cipher.init(Cipher.DECRYPT_MODE, key);
+        byte[] decoded = Base64.getDecoder().decode(data);
+        return new String(cipher.doFinal(decoded));
+    }
 
     /**
      * Decrypts Base64( IV || ciphertext ) and returns the original plaintext.

@@ -7,7 +7,7 @@ import java.util.Optional;
 
 public interface UserRepository extends JpaRepository<User, Long> {
 
-    User findByUsername(String username);
+    Optional<User> findByUsername(String username);
 
     Optional<User> findByEmail(String email);
 
@@ -15,8 +15,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
-    // Find a specific unverified account (so we can overwrite it on re-registration)
-    java.util.Optional<User> findByUsernameAndEmailVerifiedFalse(String username);
+    // Unverified account lookup
+    Optional<User> findByUsernameAndEmailVerifiedFalse(String username);
 
-    java.util.Optional<User> findByEmailAndEmailVerifiedFalse(String email);
+    Optional<User> findByEmailAndEmailVerifiedFalse(String email);
 }

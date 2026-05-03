@@ -13,14 +13,15 @@ public class Message {
 
     private String sender;
     private String receiver;
-
     @Lob
-    private String content;
+    private byte[] senderEphemeralPublicKey;
+
 
     private String hmac;
 
     private String nonce;   // NEW FIELD
-
+    @Column(length = 2000)
+    private String content;
     private LocalDateTime timestamp;
     @Enumerated(EnumType.STRING)
     private MessageStatus status;
@@ -64,4 +65,6 @@ public class Message {
 
     public int getRetryCount() { return retryCount; }
     public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
+    public byte[] getSenderEphemeralPublicKey() { return senderEphemeralPublicKey; }
+    public void setSenderEphemeralPublicKey(byte[] k) { this.senderEphemeralPublicKey = k; }
 }

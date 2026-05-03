@@ -14,9 +14,9 @@ import java.time.LocalDateTime;
 @Service
 public class UserService {
 
-    private final UserRepository    userRepository;
+    private final UserRepository userRepository;
     private final BCryptPasswordEncoder encoder;
-    private final EmailService      emailService;
+    private final EmailService emailService;
 
     @Value("${app.otp.expiry-minutes:5}")
     private int otpExpiryMinutes;
@@ -27,38 +27,26 @@ public class UserService {
                        BCryptPasswordEncoder encoder,
                        EmailService emailService) {
         this.userRepository = userRepository;
-        this.encoder        = encoder;
-        this.emailService   = emailService;
+        this.encoder = encoder;
+        this.emailService = emailService;
     }
 
-    // ── Register (step 1 of 2) ────────────────────────────────
-
-    /**
-     * Creates (or overwrites an unverified) account and sends an OTP.
-     *
-     * Rules:
-     *  - If a VERIFIED account already has this username → reject "Username already taken"
-     *  - If a VERIFIED account already has this email    → reject "Email already registered"
-     *  - If an UNVERIFIED account exists with this username or email → overwrite it
-     *    (user may have mistyped their email and is retrying)
-     */
     public User registerUser(String username, String email, String password) {
         String normalEmail = email.toLowerCase();
 
-        // Block only verified duplicates
-        User existingByUsername = userRepository.findByUsername(username);
+        // ✅ FIXED
+        User existingByUsername = userRepository.findByUsername(username).orElse(null);
         if (existingByUsername != null && existingByUsername.isEmailVerified()) {
             throw new RuntimeException("Username already taken");
         }
 
+        // already correct
         User existingByEmail = userRepository.findByEmail(normalEmail).orElse(null);
         if (existingByEmail != null && existingByEmail.isEmailVerified()) {
             throw new RuntimeException("Email already registered");
         }
 
-        // Reuse or create the user record
-        // If an unverified record exists for this username or email, overwrite it
-        User user = null;
+        User user;
         if (existingByUsername != null && !existingByUsername.isEmailVerified()) {
             user = existingByUsername;
         } else if (existingByEmail != null && !existingByEmail.isEmailVerified()) {
@@ -74,9 +62,9 @@ public class UserService {
 
         try {
             KeyPair keyPair = DHUtil.generateKeyPair();
-            user.setPublicKey(DHUtil.publicKeyToString(keyPair.getPublic()));
+            user.setPublicKey(DHUtil.publicKeyToString(keyPair.getPublic()).getBytes()); // match byte[]
         } catch (Exception e) {
-            throw new RuntimeException("Key generation failed — please try again");
+            throw new RuntimeException("Key generation failed");
         }
 
         String otp = generateOtp();
@@ -88,21 +76,22 @@ public class UserService {
         return saved;
     }
 
-    // ── Verify OTP (step 2 of 2) ──────────────────────────────
-
     public User verifyOtp(String email, String otp) {
         User user = userRepository.findByEmail(email.toLowerCase())
-                .orElseThrow(() -> new RuntimeException("No account found for this email"));
+                .orElseThrow(() -> new RuntimeException("No account found"));
 
         if (user.isEmailVerified()) {
-            throw new RuntimeException("Email is already verified");
+            throw new RuntimeException("Already verified");
         }
+
         if (user.getOtpCode() == null || user.getOtpExpiry() == null) {
-            throw new RuntimeException("No OTP found — please request a new one");
+            throw new RuntimeException("No OTP found");
         }
+
         if (LocalDateTime.now().isAfter(user.getOtpExpiry())) {
-            throw new RuntimeException("OTP has expired — please request a new one");
+            throw new RuntimeException("OTP expired");
         }
+
         if (!user.getOtpCode().equals(otp.trim())) {
             throw new RuntimeException("Incorrect OTP");
         }
@@ -113,14 +102,12 @@ public class UserService {
         return userRepository.save(user);
     }
 
-    // ── Resend OTP ────────────────────────────────────────────
-
     public void resendOtp(String email) {
         User user = userRepository.findByEmail(email.toLowerCase())
-                .orElseThrow(() -> new RuntimeException("No account found for this email"));
+                .orElseThrow(() -> new RuntimeException("No account found"));
 
         if (user.isEmailVerified()) {
-            throw new RuntimeException("Email is already verified");
+            throw new RuntimeException("Already verified");
         }
 
         String otp = generateOtp();
@@ -131,25 +118,24 @@ public class UserService {
         emailService.sendOtpEmail(user.getEmail(), user.getUsername(), otp);
     }
 
-    // ── Login ─────────────────────────────────────────────────
-
     public User loginUser(String username, String password) {
-        User user = userRepository.findByUsername(username);
+        // ✅ FIXED
+        User user = userRepository.findByUsername(username).orElse(null);
 
         if (user == null || !encoder.matches(password, user.getPasswordHash())) {
             throw new RuntimeException("Invalid username or password");
         }
+
         if (!user.isEmailVerified()) {
-            throw new RuntimeException("Please verify your email before logging in");
+            throw new RuntimeException("Verify email first");
         }
 
         return user;
     }
 
-    // ── Helpers ───────────────────────────────────────────────
-
-    public String getPublicKey(String username) {
-        User user = userRepository.findByUsername(username);
+    public byte[] getPublicKey(String username) {
+        // ✅ FIXED
+        User user = userRepository.findByUsername(username).orElse(null);
         if (user == null) throw new RuntimeException("User not found");
         return user.getPublicKey();
     }
@@ -159,7 +145,6 @@ public class UserService {
     }
 
     private String generateOtp() {
-        // Cryptographically random 6-digit OTP
         int code = 100000 + RANDOM.nextInt(900000);
         return String.valueOf(code);
     }

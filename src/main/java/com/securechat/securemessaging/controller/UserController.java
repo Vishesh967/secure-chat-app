@@ -1,5 +1,5 @@
 package com.securechat.securemessaging.controller;
-
+import java.util.Base64;
 import com.securechat.securemessaging.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,7 +16,11 @@ public class UserController {
 
     @GetMapping("/{username}/public-key")
     public ResponseEntity<String> getPublicKey(@PathVariable String username) {
-        return ResponseEntity.ok(userService.getPublicKey(username));
+
+
+        return ResponseEntity.ok(
+                Base64.getEncoder().encodeToString(userService.getPublicKey(username))
+        );
     }
 
     @GetMapping("/{username}/exists")

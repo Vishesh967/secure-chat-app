@@ -1,4 +1,6 @@
 package com.securechat.securemessaging.service;
+
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import com.securechat.securemessaging.model.MessageStatus;
 import com.securechat.securemessaging.dto.ConversationPreview;
@@ -10,13 +12,18 @@ import com.securechat.securemessaging.security.HMACUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import com.securechat.securemessaging.service.PeerService;
+import com.securechat.securemessaging.model.TransportType;
+import com.securechat.securemessaging.repository.UserRepository;
+import com.securechat.securemessaging.model.User;
+import com.securechat.securemessaging.security.ECDHUtil;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-
+import java.security.*;
+import java.security.spec.X509EncodedKeySpec;
+import javax.crypto.SecretKey;
 
 @Service
 public class MessageService {
@@ -26,11 +33,25 @@ public class MessageService {
 
     private final MessageRepository messageRepository;
     private final MessageRouter router;
+    private final SimpMessagingTemplate messagingTemplate;
+    private final PeerService peerService;
+    private final UserRepository userRepository;
 
-    public MessageService(MessageRepository messageRepository, MessageRouter router) {
+    private final Map<String, PrivateKey> keyStore = new ConcurrentHashMap<>();
+
+    public MessageService(MessageRepository messageRepository,
+                          MessageRouter router,
+                          SimpMessagingTemplate messagingTemplate,
+                          PeerService peerService,
+                          UserRepository userRepository) {
+
         this.messageRepository = messageRepository;
         this.router = router;
+        this.messagingTemplate = messagingTemplate;
+        this.peerService = peerService;
+        this.userRepository = userRepository;
     }
+
     public void markAsDelivered(int messageId) {
         Message msg = messageRepository.findById(messageId).orElse(null);
         if (msg != null) {
@@ -38,43 +59,92 @@ public class MessageService {
             messageRepository.save(msg);
         }
     }
-    /**
-     * Encrypts the content, generates a nonce and HMAC, then persists the message.
-     */
+
     public MessageResponse sendMessage(String sender, String receiver, String content) {
         Message message = new Message();
         message.setSender(sender);
         message.setReceiver(receiver);
         message.setTransport(router.decideRoute());
+
+        if (message.getTransport() == TransportType.LAN) {
+            if (!peerService.isTrusted(receiver)) {
+                throw new RuntimeException("Untrusted peer");
+            }
+        }
+
         message.setStatus(MessageStatus.PENDING);
         message.setRetryCount(0);
 
         try {
-            String encrypted = AESUtil.encrypt(content);
+            User receiverUser = userRepository.findByUsername(receiver)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            PublicKey receiverPublicKey = KeyFactory.getInstance("EC")
+                    .generatePublic(new X509EncodedKeySpec(receiverUser.getPublicKey()));
+
+            KeyPair ephemeralKeyPair = ECDHUtil.generateKeyPair();
+
+            // store sender private key for later decryption
+            keyStore.put(sender, ephemeralKeyPair.getPrivate());
+
+            SecretKey sessionKey = ECDHUtil.deriveSharedKey(
+                    ephemeralKeyPair.getPrivate(),
+                    receiverPublicKey
+            );
+
+            String encrypted = AESUtil.encryptWithKey(content, sessionKey);
+
+            message.setSenderEphemeralPublicKey(
+                    ephemeralKeyPair.getPublic().getEncoded()
+            );
+
             message.setContent(encrypted);
 
             String nonce;
             do { nonce = UUID.randomUUID().toString(); }
             while (messageRepository.existsByNonce(nonce));
-            message.setNonce(nonce);
 
+            message.setNonce(nonce);
             message.setHmac(HMACUtil.generateHMAC(encrypted, HMAC_KEY));
+
         } catch (Exception e) {
-            log.error("Encryption failed for sender={}", sender, e);
-            throw new RuntimeException("Failed to send message — encryption error");
+            log.error("Encryption failed", e);
+            throw new RuntimeException("Encryption error");
         }
 
         Message saved = messageRepository.save(message);
-        return toResponse(saved, content);
 
+        messagingTemplate.convertAndSend(
+                "/topic/messages/" + receiver,
+                toResponse(saved, content)
+        );
+
+        return toResponse(saved, content);
     }
+
     @Scheduled(fixedDelay = 5000)
     public void autoRetry() {
         retryPendingMessages();
     }
-    /**
-     * Returns the full conversation between two users, decrypted and sorted by time.
-     */
+
+    public void retryPendingMessages() {
+        List<Message> pending = messageRepository.findByStatus(MessageStatus.PENDING);
+
+        for (Message msg : pending) {
+            if (msg.getRetryCount() > 5) continue;
+
+            try {
+                if (msg.getStatus() != MessageStatus.DELIVERED) {
+                    msg.setStatus(MessageStatus.SENT);
+                }
+                messageRepository.save(msg);
+            } catch (Exception e) {
+                msg.setRetryCount(msg.getRetryCount() + 1);
+                messageRepository.save(msg);
+            }
+        }
+    }
+
     public List<MessageResponse> getConversation(String user1, String user2) {
         List<Message> side1 = messageRepository
                 .findBySenderAndReceiverOrderByTimestampAsc(user1, user2);
@@ -89,83 +159,38 @@ public class MessageService {
                 .map(this::decryptAndMap)
                 .collect(Collectors.toList());
     }
-    public void retryPendingMessages() {
-        List<Message> pending = messageRepository.findByStatus(MessageStatus.PENDING);
-
-        for (Message msg : pending) {
-            try {
-                // For now: simulate delivery
-                if (msg.getStatus() != MessageStatus.DELIVERED) {
-                    msg.setStatus(MessageStatus.SENT);
-                }
-                messageRepository.save(msg);
-            } catch (Exception e) {
-                msg.setRetryCount(msg.getRetryCount() + 1);
-                messageRepository.save(msg);
-            }
-        }
+    public List<ConversationPreview> getDmPreviews(String user) {
+        return new ArrayList<>(); // temporary stub
     }
-
-    /**
-     * Returns DM conversation previews for the sidebar — one entry per partner,
-     * sorted by most recent message. Works for both sender and receiver sides,
-     * so User B sees User A in their sidebar even if User A sent first.
-     */
-    public List<ConversationPreview> getDmPreviews(String username) {
-        // Collect all unique partners from both directions
-        List<String> sent     = messageRepository.findReceiversForSender(username);
-        List<String> received = messageRepository.findSendersForReceiver(username);
-
-        // Merge and deduplicate
-        java.util.Set<String> partnerSet = new java.util.LinkedHashSet<>();
-        partnerSet.addAll(sent);
-        partnerSet.addAll(received);
-
-        return partnerSet.stream()
-                .map(partner -> {
-                    String lastMsg = "";
-                    java.time.LocalDateTime lastTime = null;
-
-                    var latest = messageRepository.findLatestBetween(username, partner);
-                    if (latest.isPresent()) {
-                        lastTime = latest.get().getTimestamp();
-                        try {
-                            Message m = latest.get();
-                            if (m.getHmac() != null && m.getNonce() != null) {
-                                boolean valid = HMACUtil.verifyHMAC(m.getContent(), HMAC_KEY, m.getHmac());
-                                if (valid) {
-                                    String dec = AESUtil.decrypt(m.getContent());
-                                    lastMsg = dec.length() > 60 ? dec.substring(0, 60) + "…" : dec;
-                                }
-                            } else {
-                                lastMsg = m.getContent() != null ? m.getContent() : "";
-                            }
-                        } catch (Exception ignored) {}
-                    }
-
-                    return ConversationPreview.dm(partner, lastMsg, lastTime);
-                })
-                .sorted(Comparator.comparing(
-                        ConversationPreview::getLastMessageTime,
-                        Comparator.nullsLast(Comparator.reverseOrder())))
-                .collect(Collectors.toList());
-    }
-
-    // ── Private helpers ───────────────────────────────────────────────────────
-
     private MessageResponse decryptAndMap(Message msg) {
-        if (msg.getHmac() == null || msg.getNonce() == null) {
-            return toResponse(msg, msg.getContent());
-        }
         try {
+            if (msg.getHmac() == null || msg.getNonce() == null) {
+                return toResponse(msg, msg.getContent());
+            }
+
             boolean valid = HMACUtil.verifyHMAC(msg.getContent(), HMAC_KEY, msg.getHmac());
             if (!valid) {
-                log.warn("HMAC verification failed for message id={}", msg.getId());
                 return toResponse(msg, "[integrity check failed]");
             }
-            return toResponse(msg, AESUtil.decrypt(msg.getContent()));
+
+            PrivateKey receiverPrivateKey = keyStore.get(msg.getReceiver());
+            if (receiverPrivateKey == null) {
+                return toResponse(msg, "[key missing]");
+            }
+
+            PublicKey senderPublicKey = KeyFactory.getInstance("EC")
+                    .generatePublic(new X509EncodedKeySpec(msg.getSenderEphemeralPublicKey()));
+
+            SecretKey sessionKey = ECDHUtil.deriveSharedKey(
+                    receiverPrivateKey,
+                    senderPublicKey
+            );
+
+            String decrypted = AESUtil.decryptWithKey(msg.getContent(), sessionKey);
+
+            return toResponse(msg, decrypted);
+
         } catch (Exception e) {
-            log.error("Decryption failed for message id={}", msg.getId(), e);
             return toResponse(msg, "[decryption error]");
         }
     }

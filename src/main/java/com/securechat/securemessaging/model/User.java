@@ -21,8 +21,7 @@ public class User {
     private String passwordHash;
 
     @Lob
-    @Column(columnDefinition = "LONGTEXT")
-    private String publicKey;
+    private byte[] publicKey;
 
     // ── Email verification ────────────────────────────────────
     @Column(nullable = false)
@@ -56,8 +55,9 @@ public class User {
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
 
-    public String getPublicKey() { return publicKey; }
-    public void setPublicKey(String publicKey) { this.publicKey = publicKey; }
+    // ✅ FIXED (byte[] instead of String)
+    public byte[] getPublicKey() { return publicKey; }
+    public void setPublicKey(byte[] publicKey) { this.publicKey = publicKey; }
 
     public boolean isEmailVerified() { return emailVerified; }
     public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
