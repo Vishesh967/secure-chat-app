@@ -44,7 +44,9 @@ public class SecurityConfig {
                     "/index.html",
                     "/chat.html",
                     "/script.js",
-                    "/style.css"
+                    "/style.css",
+                    "/ws/**",
+                    "/ws-native/**"
                 ).permitAll()
                 // Everything else requires a valid JWT
                 .anyRequest().authenticated()

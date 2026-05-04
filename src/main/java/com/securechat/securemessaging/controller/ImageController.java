@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/images")
@@ -35,7 +36,7 @@ public class ImageController {
     }
 
     /**
-     * Fetch all images in a DM conversation (decrypted as data URLs).
+     * Fetch all encrypted images in a DM conversation.
      */
     @GetMapping("/dm")
     public ResponseEntity<List<ImageMessageResponse>> getDmImages(
@@ -56,6 +57,22 @@ public class ImageController {
         return ResponseEntity.ok(imageService.getDmImage(imageId, currentUser));
     }
 
+    @PostMapping("/dm/ack")
+    public ResponseEntity<Void> ackImage(@RequestParam("messageId") Long messageId) {
+        imageService.markImageAsDelivered(messageId);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/dm/read")
+    public ResponseEntity<Void> readImages(
+            @AuthenticationPrincipal String currentUser,
+            @RequestBody Map<String, List<Long>> payload) {
+        
+        List<Long> messageIds = payload.get("messageIds");
+        imageService.markImagesAsRead(currentUser, messageIds);
+        return ResponseEntity.ok().build();
+    }
+
     // ── Group image endpoints ─────────────────────────────────
 
     /**
@@ -72,7 +89,7 @@ public class ImageController {
     }
 
     /**
-     * Fetch all images in a group conversation (decrypted as data URLs).
+     * Fetch all encrypted images in a group conversation.
      */
     @GetMapping("/group/{groupId}")
     public ResponseEntity<List<ImageMessageResponse>> getGroupImages(

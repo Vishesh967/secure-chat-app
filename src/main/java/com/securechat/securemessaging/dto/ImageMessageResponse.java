@@ -5,9 +5,8 @@ import java.time.LocalDateTime;
 /**
  * Returned to the client after sending or fetching an image message.
  *
- * The decryptedDataUrl field carries a data: URI (data:image/jpeg;base64,...)
- * that the browser can render directly as an <img> src.
- * It is populated only when the image is successfully decrypted server-side.
+ * The encryptedData field carries the encrypted image envelope.
+ * decryptedDataUrl is only used by the frontend after local decryption.
  */
 public class ImageMessageResponse {
 
@@ -19,6 +18,9 @@ public class ImageMessageResponse {
     private String imageType;
     private long   imageSize;
     private LocalDateTime timestamp;
+    private String encryptedData;
+    private String status;
+    private int retryCount;
 
     /** data:<imageType>;base64,<raw bytes as base64> — ready for <img src="..."> */
     private String decryptedDataUrl;
@@ -56,6 +58,15 @@ public class ImageMessageResponse {
 
     public String getDecryptedDataUrl() { return decryptedDataUrl; }
     public void setDecryptedDataUrl(String decryptedDataUrl) { this.decryptedDataUrl = decryptedDataUrl; }
+
+    public String getEncryptedData() { return encryptedData; }
+    public void setEncryptedData(String encryptedData) { this.encryptedData = encryptedData; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+
+    public int getRetryCount() { return retryCount; }
+    public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
 
     public String getMessageType() { return messageType; }
 }

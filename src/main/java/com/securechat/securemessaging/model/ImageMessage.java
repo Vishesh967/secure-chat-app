@@ -54,6 +54,13 @@ public class ImageMessage {
     @Column(nullable = false, updatable = false)
     private LocalDateTime timestamp;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private MessageStatus status = MessageStatus.PENDING;
+
+    @Column(nullable = false)
+    private int retryCount = 0;
+
     public ImageMessage() {
         this.timestamp = LocalDateTime.now();
     }
@@ -89,4 +96,10 @@ public class ImageMessage {
 
     public LocalDateTime getTimestamp() { return timestamp; }
     public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }
+
+    public MessageStatus getStatus() { return status; }
+    public void setStatus(MessageStatus status) { this.status = status; }
+
+    public int getRetryCount() { return retryCount; }
+    public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
 }

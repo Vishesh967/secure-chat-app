@@ -52,6 +52,48 @@ function formatRelative(iso) {
 }
 
 // ── Page detection ────────────────────────────────────────────
+async function setupLanPanel() {
+  const ipText = document.getElementById("lan-ip-text");
+  const urlEl = document.getElementById("lan-url");
+  const labelEl = document.getElementById("network-label");
+
+  if (!ipText || !urlEl) return;
+
+  let lanIp = window.location.hostname;
+  try {
+    const res = await fetch(`${BASE_URL || window.location.origin}/users/lan-ip`);
+    if (res.ok) {
+        const data = await res.json();
+        if (data.ip) lanIp = data.ip;
+    }
+  } catch (e) {}
+
+  let port = window.location.port ? `:${window.location.port}` : '';
+  let url = `${window.location.protocol}//${lanIp}${port}`;
+  urlEl.innerText = url;
+
+  let mode = "INTERNET";
+  if (lanIp === "localhost" || lanIp === "127.0.0.1" || lanIp === "::1") {
+    mode = "LOCAL";
+  } else if (/^192\.168\./.test(lanIp) || /^10\./.test(lanIp) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(lanIp)) {
+    mode = "LAN";
+  }
+
+  if (labelEl) labelEl.innerText = mode;
+
+  if (mode === "LOCAL") {
+    ipText.innerText = "LOCAL - " + lanIp;
+  } else if (mode === "LAN") {
+    ipText.innerText = "On LAN - " + lanIp;
+  } else {
+    ipText.innerText = "INTERNET - " + lanIp;
+  }
+
+  document.getElementById("copyLanUrl").onclick = () => {
+    navigator.clipboard.writeText(url);
+  };
+}
+
 const path    = window.location.pathname;
 const isIndex = path.endsWith('index.html') || path === '/' || path === '';
 const isChat  = path.endsWith('chat.html');
@@ -127,6 +169,8 @@ if (isIndex) {
       if (res.ok) {
         localStorage.setItem('sc_token', data.token);
         localStorage.setItem('sc_user',  data.username);
+        if (data.email) localStorage.setItem('sc_email', data.email);
+        if (data.publicKey) localStorage.setItem('sc_server_public_key', data.publicKey);
         showAlert('loginAlert', 'Login successful! Redirecting…', 'success');
         setTimeout(() => window.location.href = 'chat.html', 800);
       } else {
@@ -196,6 +240,8 @@ if (isIndex) {
       if (res.ok) {
         localStorage.setItem('sc_token', data.token);
         localStorage.setItem('sc_user',  data.username);
+        if (data.email) localStorage.setItem('sc_email', data.email);
+        if (data.publicKey) localStorage.setItem('sc_server_public_key', data.publicKey);
         showAlert('otpAlert', 'Email verified! Signing you in…', 'success');
         setTimeout(() => window.location.href = 'chat.html', 900);
       } else {
@@ -294,6 +340,7 @@ if (isChat) {
   const chatHeaderSub  = document.getElementById('chatHeaderSub');
   const chatHeaderActs = document.getElementById('chatHeaderActions');
   const messagesArea   = document.getElementById('messagesArea');
+  const typingIndicator = document.getElementById('typingIndicator');
   const messageInput   = document.getElementById('messageInput');
   const sendBtn        = document.getElementById('sendBtn');
   const imageFileInput = document.getElementById('imageFileInput');
@@ -307,15 +354,332 @@ if (isChat) {
   let allDmPreviews  = [];
   let allGroups      = [];
   let pendingImageFile = null;
+  let e2eIdentity    = null;
+  let stompSocket    = null;
+  let stompConnected = false;
+  let stompReconnectTimer = null;
+  let typingTimer    = null;
+  let typingSentAt   = 0;
+  const profileCache = new Map();
 
   // ── Init ───────────────────────────────────────────────────
   loggedInUserEl.textContent = ME;
   avatarEl.textContent       = initials(ME);
-  allDmPreviews = mergeKnownUsers([]);
-  renderDmList(allDmPreviews);
-  loadSidebar().then(restoreActiveDm);
+  setupLanPanel();
+  initializeChat();
+
+  async function initializeChat() {
+    allDmPreviews = mergeKnownUsers([]);
+    renderDmList(allDmPreviews);
+
+    try {
+      await ensureE2EIdentity();
+    } catch (e) {
+      showToast(e.message || 'Could not prepare E2E keys', 'error');
+    }
+
+    await loadSidebar();
+    await restoreActiveDm();
+    connectRealtime();
+  }
 
   // ── Sidebar bootstrap ──────────────────────────────────────
+  // E2E helpers: private keys stay in this browser; the backend only receives public keys and ciphertext.
+  function utf8ToBytes(text) {
+    return new TextEncoder().encode(text);
+  }
+
+  function bytesToUtf8(bytes) {
+    return new TextDecoder().decode(bytes);
+  }
+
+  function bytesToBase64(bytes) {
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+
+  function base64ToBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function base64Json(obj) {
+    return bytesToBase64(utf8ToBytes(JSON.stringify(obj)));
+  }
+
+  function jsonFromBase64(value) {
+    return JSON.parse(bytesToUtf8(base64ToBytes(value)));
+  }
+
+  function randomNonce() {
+    const nonce = new Uint8Array(12);
+    crypto.getRandomValues(nonce);
+    return nonce;
+  }
+
+  async function ensureE2EIdentity() {
+    if (e2eIdentity) return e2eIdentity;
+    if (!crypto.subtle) throw new Error('WebCrypto is not available in this browser');
+
+    const privateKeyName = `sc_e2e_private_${ME}`;
+    const publicKeyName = `sc_e2e_public_${ME}`;
+    let privateJwk = JSON.parse(localStorage.getItem(privateKeyName) || 'null');
+    let publicKeyString = localStorage.getItem(publicKeyName);
+
+    if (!privateJwk || !publicKeyString) {
+      const pair = await crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' },
+        true,
+        ['deriveKey']
+      );
+      privateJwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
+      const publicJwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
+      publicKeyString = base64Json(publicJwk);
+      localStorage.setItem(privateKeyName, JSON.stringify(privateJwk));
+      localStorage.setItem(publicKeyName, publicKeyString);
+    }
+
+    const privateKey = await crypto.subtle.importKey(
+      'jwk',
+      privateJwk,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      ['deriveKey']
+    );
+
+    e2eIdentity = { privateKey, publicKeyString };
+    await publishMyPublicKey(publicKeyString);
+    return e2eIdentity;
+  }
+
+  async function publishMyPublicKey(publicKey) {
+    const res = await fetch(`${BASE_URL}/users/me/public-key`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ publicKey })
+    });
+    if (res.status === 401) { handleUnauthorized(); return; }
+    if (!res.ok) throw new Error('Could not publish E2E public key');
+    profileCache.delete(ME);
+  }
+
+  async function fetchUserProfile(username) {
+    if (profileCache.has(username)) return profileCache.get(username);
+    const res = await fetch(`${BASE_URL}/users/${encodeURIComponent(username)}`, { headers: authHeaders() });
+    if (res.status === 401) { handleUnauthorized(); return null; }
+    if (!res.ok) throw new Error('User profile not found');
+    const profile = await res.json();
+    profileCache.set(username, profile);
+    return profile;
+  }
+
+  async function importPublicKey(publicKeyString) {
+    if (!publicKeyString) throw new Error('Missing public key');
+    try {
+      const jwk = jsonFromBase64(publicKeyString);
+      return crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'ECDH', namedCurve: 'P-256' },
+        false,
+        []
+      );
+    } catch {
+      throw new Error('E2E public key is not ready for this user');
+    }
+  }
+
+  async function deriveSharedKey(peerPublicKeyString) {
+    await ensureE2EIdentity();
+    const publicKey = await importPublicKey(peerPublicKeyString);
+    return crypto.subtle.deriveKey(
+      { name: 'ECDH', public: publicKey },
+      e2eIdentity.privateKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encryptBytesWithKey(bytes, key) {
+    const nonce = randomNonce();
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, bytes);
+    return {
+      encryptedContent: bytesToBase64(new Uint8Array(encrypted)),
+      nonce: bytesToBase64(nonce)
+    };
+  }
+
+  async function decryptBytesWithKey(encryptedContent, nonce, key) {
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToBytes(nonce) },
+      key,
+      base64ToBytes(encryptedContent)
+    );
+    return new Uint8Array(decrypted);
+  }
+
+  async function encryptTextWithKey(text, key) {
+    return encryptBytesWithKey(utf8ToBytes(text), key);
+  }
+
+  async function decryptTextWithKey(encryptedContent, nonce, key) {
+    return bytesToUtf8(await decryptBytesWithKey(encryptedContent, nonce, key));
+  }
+
+  async function encryptDmPayload(text, receiver) {
+    const profile = await fetchUserProfile(receiver);
+    const key = await deriveSharedKey(profile.publicKey);
+    return {
+      ...(await encryptTextWithKey(text, key)),
+      senderPublicKey: e2eIdentity.publicKeyString
+    };
+  }
+
+  async function decryptDmMessage(msg) {
+    if (msg.messageType === 'IMAGE') return msg;
+    const encryptedContent = msg.encryptedContent || msg.content;
+    if (!encryptedContent || !msg.nonce || (!msg.senderPublicKey && msg.sender !== ME)) {
+      return { ...msg, content: '[Encrypted message unavailable on this device]' };
+    }
+
+    try {
+      const peer = msg.sender === ME ? msg.receiver : msg.sender;
+      const peerPublicKey = msg.sender === ME
+        ? (await fetchUserProfile(peer)).publicKey
+        : msg.senderPublicKey;
+      const key = await deriveSharedKey(peerPublicKey);
+      return { ...msg, content: await decryptTextWithKey(encryptedContent, msg.nonce, key) };
+    } catch {
+      return { ...msg, content: '[Encrypted message unavailable on this device]' };
+    }
+  }
+
+  async function encryptGroupPayload(text, group) {
+    const contentKey = await crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    const encrypted = await encryptTextWithKey(text, contentKey);
+    const rawKey = new Uint8Array(await crypto.subtle.exportKey('raw', contentKey));
+    const members = [...new Set([...(group.members || []), ME])];
+    const keys = {};
+
+    await Promise.all(members.map(async member => {
+      const profile = await fetchUserProfile(member);
+      const sharedKey = await deriveSharedKey(profile.publicKey);
+      keys[member] = {
+        ...(await encryptBytesWithKey(rawKey, sharedKey)),
+        senderPublicKey: e2eIdentity.publicKeyString
+      };
+    }));
+
+    return JSON.stringify({
+      v: 1,
+      kind: 'group-text',
+      encryptedContent: encrypted.encryptedContent,
+      nonce: encrypted.nonce,
+      keys
+    });
+  }
+
+  async function decryptGroupMessage(msg) {
+    if (msg.messageType === 'IMAGE') return msg;
+    try {
+      const envelope = JSON.parse(msg.encryptedContent || msg.content);
+      const wrappedKey = envelope.keys && envelope.keys[ME];
+      if (!wrappedKey) throw new Error('No group key for this user');
+      const sharedKey = await deriveSharedKey(wrappedKey.senderPublicKey);
+      const rawKey = await decryptBytesWithKey(wrappedKey.encryptedContent, wrappedKey.nonce, sharedKey);
+      const contentKey = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
+      return {
+        ...msg,
+        content: await decryptTextWithKey(envelope.encryptedContent, envelope.nonce, contentKey)
+      };
+    } catch {
+      return { ...msg, content: '[Encrypted message unavailable on this device]' };
+    }
+  }
+
+  async function decryptTextMessages(messages, isGroup) {
+    return Promise.all((messages || []).map(msg => isGroup ? decryptGroupMessage(msg) : decryptDmMessage(msg)));
+  }
+
+  async function encryptImageEnvelope(file, isGroup) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (isGroup) {
+      const contentKey = await crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: 256 },
+        true,
+        ['encrypt', 'decrypt']
+      );
+      const encrypted = await encryptBytesWithKey(bytes, contentKey);
+      const rawKey = new Uint8Array(await crypto.subtle.exportKey('raw', contentKey));
+      const members = [...new Set([...(activeGroupObj?.members || []), ME])];
+      const keys = {};
+      await Promise.all(members.map(async member => {
+        const profile = await fetchUserProfile(member);
+        const sharedKey = await deriveSharedKey(profile.publicKey);
+        keys[member] = {
+          ...(await encryptBytesWithKey(rawKey, sharedKey)),
+          senderPublicKey: e2eIdentity.publicKeyString
+        };
+      }));
+      return JSON.stringify({ v: 1, kind: 'group-image', ...encrypted, keys });
+    }
+
+    const profile = await fetchUserProfile(activeTarget);
+    const key = await deriveSharedKey(profile.publicKey);
+    return JSON.stringify({
+      v: 1,
+      kind: 'dm-image',
+      ...(await encryptBytesWithKey(bytes, key)),
+      senderPublicKey: e2eIdentity.publicKeyString
+    });
+  }
+
+  async function decryptImageMessage(msg, isGroup) {
+    if (msg.decryptedDataUrl || !msg.encryptedData) return msg;
+    try {
+      const envelope = JSON.parse(bytesToUtf8(base64ToBytes(msg.encryptedData)));
+      let imageBytes;
+
+      if (isGroup) {
+        const wrappedKey = envelope.keys && envelope.keys[ME];
+        if (!wrappedKey) throw new Error('No group image key for this user');
+        const sharedKey = await deriveSharedKey(wrappedKey.senderPublicKey);
+        const rawKey = await decryptBytesWithKey(wrappedKey.encryptedContent, wrappedKey.nonce, sharedKey);
+        const contentKey = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
+        imageBytes = await decryptBytesWithKey(envelope.encryptedContent, envelope.nonce, contentKey);
+      } else {
+        const peerPublicKey = msg.sender === ME
+          ? (await fetchUserProfile(msg.receiver)).publicKey
+          : envelope.senderPublicKey;
+        const key = await deriveSharedKey(peerPublicKey);
+        imageBytes = await decryptBytesWithKey(envelope.encryptedContent, envelope.nonce, key);
+      }
+
+      return {
+        ...msg,
+        decryptedDataUrl: `data:${msg.imageType};base64,${bytesToBase64(imageBytes)}`
+      };
+    } catch (err) {
+      console.error('[decryptImageMessage] Failed to decrypt image:', err);
+      return { ...msg, decryptedDataUrl: null };
+    }
+  }
+
+  async function decryptImageMessages(messages, isGroup) {
+    return Promise.all((messages || []).map(msg => decryptImageMessage(msg, isGroup)));
+  }
+
   async function loadSidebar() {
     await Promise.all([loadDmPreviews(), loadGroups()]);
   }
@@ -457,8 +821,11 @@ if (isChat) {
     chatAvatarEl.className   = 'chat-header-avatar';
     chatAvatarEl.textContent = initials(username);
     chatHeaderName.textContent = username;
-    chatHeaderSub.textContent  = 'Secure channel - AES-128 CBC';
+    chatHeaderName.classList.add('clickable-name');
+    chatHeaderName.title = 'View profile';
+    chatHeaderSub.textContent  = 'Secure channel - E2E AES-GCM';
     chatHeaderActs.innerHTML = `<span class="enc-badge">&#128274; DM</span>`;
+    hideTypingIndicator();
 
     showActiveChat();
     renderDmList(allDmPreviews);
@@ -504,6 +871,8 @@ if (isChat) {
     chatAvatarEl.className   = 'chat-header-avatar group-avatar';
     chatAvatarEl.textContent = initials(group.name);
     chatHeaderName.textContent = group.name;
+    chatHeaderName.classList.remove('clickable-name');
+    chatHeaderName.removeAttribute('title');
     const memberCount = group.members ? group.members.length : '?';
     chatHeaderSub.textContent = `${memberCount} members · admin: ${group.admin}`;
 
@@ -539,14 +908,15 @@ if (isChat) {
       ]);
       if (textRes.status === 401 || imgRes.status === 401) { handleUnauthorized(); return; }
       if (!textRes.ok) { if (!silent) messagesArea.innerHTML = '<div class="msg-status">Failed to load</div>'; return; }
-      const textMsgs = await textRes.json();
-      const imgMsgs  = imgRes.ok ? await imgRes.json() : [];
+      const textMsgs = await decryptTextMessages(await textRes.json(), false);
+      const imgMsgs  = imgRes.ok ? await decryptImageMessages(await imgRes.json(), false) : [];
       const merged   = mergeAndSort(textMsgs, imgMsgs);
       conversations[user] = merged;
       if (activeType !== 'dm' || activeTarget !== user) return;
       if (silent && merged.length === lastMsgCount) return;
       lastMsgCount = merged.length;
       renderMessages(merged, false);
+      markIncomingVisibleMessages(merged);
       loadDmPreviews();
     } catch { if (!silent) messagesArea.innerHTML = '<div class="msg-status">Network error</div>'; }
   }
@@ -560,8 +930,8 @@ if (isChat) {
       ]);
       if (textRes.status === 401 || imgRes.status === 401) { handleUnauthorized(); return; }
       if (!textRes.ok) { if (!silent) messagesArea.innerHTML = '<div class="msg-status">Failed to load</div>'; return; }
-      const textMsgs = await textRes.json();
-      const imgMsgs  = imgRes.ok ? await imgRes.json() : [];
+      const textMsgs = await decryptTextMessages(await textRes.json(), true);
+      const imgMsgs  = imgRes.ok ? await decryptImageMessages(await imgRes.json(), true) : [];
       const merged   = mergeAndSort(textMsgs, imgMsgs);
       if (silent && merged.length === lastMsgCount) return;
       lastMsgCount = merged.length;
@@ -617,15 +987,93 @@ if (isChat) {
         grp.appendChild(bubble);
       }
 
+      const meta = document.createElement('span');
+      meta.className = 'msg-meta';
+
       const time = document.createElement('span');
       time.className = 'msg-time';
       time.textContent = formatTime(msg.timestamp);
-      grp.appendChild(time);
+      meta.appendChild(time);
+
+      if (isSent && !isGroup) {
+        meta.appendChild(buildStatusIndicator(msg));
+      }
+
+      grp.appendChild(meta);
 
       messagesArea.appendChild(grp);
     });
 
     if (atBottom) scrollToBottom();
+  }
+
+  function buildStatusIndicator(msg) {
+    const status = document.createElement('span');
+    status.className = 'msg-status-icon';
+    const retryCount = Number(msg.retryCount || 0);
+    const state = (msg.status || '').toUpperCase();
+
+    if (state === 'FAILED' || (state === 'PENDING' && retryCount > 5)) {
+      status.classList.add('failed');
+      status.textContent = 'Failed to send';
+    } else if (state === 'READ') {
+      status.classList.add('read');
+      status.innerHTML = '&#10003;&#10003;';
+    } else if (state === 'DELIVERED') {
+      status.innerHTML = '&#10003;&#10003;';
+    } else if (retryCount > 0) {
+      status.textContent = 'Retrying...';
+    } else if (state === 'PENDING') {
+      status.textContent = 'Sending...';
+    } else {
+      status.innerHTML = '&#10003;';
+    }
+
+    return status;
+  }
+
+  async function acknowledgeDelivered(messages) {
+    const incoming = (messages || []).filter(msg =>
+      msg && msg.id && msg.sender !== ME && msg.status !== 'DELIVERED' && msg.status !== 'READ'
+    );
+    await Promise.all(incoming.map(msg =>
+      fetch(`${BASE_URL}/${msg.messageType === 'IMAGE' ? 'images/dm' : 'messages'}/ack?messageId=${encodeURIComponent(msg.id)}`, {
+        method: 'POST',
+        headers: authHeaders()
+      }).catch(() => null)
+    ));
+  }
+
+  async function markIncomingVisibleMessages(messages) {
+    if (activeType !== 'dm' || !activeTarget) return;
+    const incoming = (messages || []).filter(msg =>
+      msg && msg.id && msg.sender === activeTarget && msg.status !== 'READ'
+    );
+    if (incoming.length === 0) return;
+
+    const ids = incoming.map(msg => msg.id);
+    const textIds = incoming.filter(m => m.messageType !== 'IMAGE').map(m => m.id);
+    const imgIds = incoming.filter(m => m.messageType === 'IMAGE').map(m => m.id);
+
+    try {
+      if (textIds.length > 0) {
+        await fetch(`${BASE_URL}/messages/read`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ messageIds: textIds })
+        });
+      }
+      if (imgIds.length > 0) {
+        await fetch(`${BASE_URL}/images/dm/read`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ messageIds: imgIds })
+        });
+      }
+      incoming.forEach(msg => { msg.status = 'READ'; });
+    } catch {
+      acknowledgeDelivered(incoming);
+    }
   }
 
   function buildImageBubble(msg) {
@@ -651,7 +1099,7 @@ if (isChat) {
 
       wrap.addEventListener('click', () => openImageViewer(msg));
     } else {
-      wrap.innerHTML = `<div style="padding:10px;font-size:0.82rem;color:var(--danger)">&#9888; Image integrity check failed</div>`;
+      wrap.innerHTML = `<div style="padding:10px;font-size:0.82rem;color:var(--danger)">Image unavailable on this device</div>`;
     }
     return wrap;
   }
@@ -661,6 +1109,7 @@ if (isChat) {
   messageInput.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
+  messageInput.addEventListener('input', notifyTyping);
 
   async function sendMessage() {
     const content = messageInput.value.trim();
@@ -670,14 +1119,19 @@ if (isChat) {
     try {
       let res;
       if (activeType === 'dm') {
+        const encrypted = await encryptDmPayload(content, activeTarget);
         res = await fetch(`${BASE_URL}/messages/send`, {
           method: 'POST', headers: authHeaders(),
-          body: JSON.stringify({ receiver: activeTarget, content })
+          body: JSON.stringify({ receiver: activeTarget, ...encrypted })
         });
       } else {
+        const encryptedContent = await encryptGroupPayload(content, activeGroupObj);
         res = await fetch(`${BASE_URL}/groups/${activeTarget}/messages`, {
           method: 'POST', headers: authHeaders(),
-          body: JSON.stringify({ content })
+          body: JSON.stringify({
+            content: encryptedContent,
+            nonce: crypto.randomUUID ? crypto.randomUUID() : bytesToBase64(randomNonce())
+          })
         });
       }
       if (res.status === 401) { handleUnauthorized(); return; }
@@ -689,8 +1143,8 @@ if (isChat) {
         showToast(data.message || 'Failed to send', 'error');
         messageInput.value = content;
       }
-    } catch {
-      showToast('Network error — message not sent', 'error');
+    } catch (e) {
+      showToast(e.message || 'Network error - message not sent', 'error');
       messageInput.value = content;
     } finally {
       sendBtn.disabled = false;
@@ -745,10 +1199,12 @@ if (isChat) {
     messagesArea.appendChild(progressEl);
     scrollToBottom();
 
-    const formData = new FormData();
-    formData.append('file', pendingImageFile);
-
     try {
+      const encryptedEnvelope = await encryptImageEnvelope(pendingImageFile, activeType === 'group');
+      const encryptedFile = new File([encryptedEnvelope], pendingImageFile.name, { type: pendingImageFile.type });
+      const formData = new FormData();
+      formData.append('file', encryptedFile);
+
       let res;
       if (activeType === 'dm') {
         formData.append('receiver', activeTarget);
@@ -773,8 +1229,8 @@ if (isChat) {
         const data = await res.json().catch(() => ({}));
         showToast(data.message || 'Failed to send image', 'error');
       }
-    } catch {
-      showToast('Network error — image not sent', 'error');
+    } catch (e) {
+      showToast(e.message || 'Network error - image not sent', 'error');
     } finally {
       progressEl.remove();
     }
@@ -793,6 +1249,34 @@ if (isChat) {
   }
 
   // ── New DM modal ───────────────────────────────────────────
+  document.querySelector('.topbar-user')?.addEventListener('click', () => openUserProfile(ME));
+  chatHeaderName.addEventListener('click', () => {
+    if (activeType === 'dm' && activeTarget) openUserProfile(activeTarget);
+  });
+
+  async function openUserProfile(username) {
+    const avatar = document.getElementById('profileAvatar');
+    const nameEl = document.getElementById('profileUsername');
+    const emailEl = document.getElementById('profileEmail');
+    const keyEl = document.getElementById('profilePublicKey');
+
+    avatar.textContent = initials(username);
+    nameEl.textContent = username;
+    emailEl.textContent = 'Loading...';
+    keyEl.textContent = '';
+    openModal('modalProfile');
+
+    try {
+      const profile = await fetchUserProfile(username);
+      nameEl.textContent = profile.username || username;
+      emailEl.textContent = profile.email || 'Email unavailable';
+      keyEl.textContent = profile.publicKey || 'No public key published yet';
+    } catch {
+      emailEl.textContent = 'Profile unavailable';
+      keyEl.textContent = '';
+    }
+  }
+
   document.getElementById('btnNewDm').addEventListener('click', () => openModal('modalDm'));
 
   document.getElementById('btnDmOpen').addEventListener('click', async () => {
@@ -889,6 +1373,143 @@ if (isChat) {
   }
 
   // ── Modal helpers ──────────────────────────────────────────
+  function connectRealtime() {
+    if (!window.WebSocket || stompSocket) return;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    stompSocket = new WebSocket(`${proto}//${window.location.host}/ws-native`);
+
+    stompSocket.onopen = () => {
+      sendStompFrame('CONNECT', {
+        'accept-version': '1.2',
+        'heart-beat': '10000,10000'
+      });
+    };
+
+    stompSocket.onmessage = event => {
+      String(event.data).split('\0').filter(Boolean).forEach(handleStompFrame);
+    };
+
+    stompSocket.onclose = () => {
+      stompConnected = false;
+      stompSocket = null;
+      if (!stompReconnectTimer) {
+        stompReconnectTimer = setTimeout(() => {
+          stompReconnectTimer = null;
+          connectRealtime();
+        }, 4000);
+      }
+    };
+  }
+
+  function disconnectRealtime() {
+    if (stompReconnectTimer) clearTimeout(stompReconnectTimer);
+    stompReconnectTimer = null;
+    stompConnected = false;
+    if (stompSocket) {
+      try { sendStompFrame('DISCONNECT', {}); } catch {}
+      stompSocket.close();
+      stompSocket = null;
+    }
+  }
+
+  function sendStompFrame(command, headers = {}, body = '') {
+    if (!stompSocket || stompSocket.readyState !== WebSocket.OPEN) return;
+    const headerText = Object.entries(headers)
+      .map(([k, v]) => `${k}:${v}`)
+      .join('\n');
+    stompSocket.send(`${command}\n${headerText}\n\n${body}\0`);
+  }
+
+  function subscribe(destination, id) {
+    sendStompFrame('SUBSCRIBE', { id, destination, ack: 'auto' });
+  }
+
+  function handleStompFrame(rawFrame) {
+    const frame = rawFrame.trimStart();
+    if (!frame) return;
+    const splitAt = frame.indexOf('\n\n');
+    const head = splitAt >= 0 ? frame.slice(0, splitAt) : frame;
+    const body = splitAt >= 0 ? frame.slice(splitAt + 2) : '';
+    const [command, ...headerLines] = head.split('\n');
+    const headers = Object.fromEntries(headerLines.map(line => {
+      const idx = line.indexOf(':');
+      return idx > -1 ? [line.slice(0, idx), line.slice(idx + 1)] : [line, ''];
+    }));
+
+    if (command === 'CONNECTED') {
+      stompConnected = true;
+      subscribe(`/topic/messages/${ME}`, 'messages');
+      subscribe(`/topic/message-status/${ME}`, 'message-status');
+      subscribe(`/topic/typing/${ME}`, 'typing');
+      return;
+    }
+
+    if (command !== 'MESSAGE') return;
+    const destination = headers.destination || '';
+    const payload = body ? JSON.parse(body) : {};
+    if (destination.includes('/topic/messages/')) handleRealtimeMessage(payload);
+    if (destination.includes('/topic/message-status/')) handleStatusEvent(payload);
+    if (destination.includes('/topic/typing/')) handleTypingEvent(payload);
+  }
+
+  async function handleRealtimeMessage(msg) {
+    if (!msg || msg.sender === ME) return;
+    await acknowledgeDelivered([msg]);
+    if (activeType === 'dm' && activeTarget === msg.sender) {
+      await fetchAndRenderDm(msg.sender);
+    } else {
+      await loadDmPreviews();
+    }
+  }
+
+  function handleStatusEvent(event) {
+    if (!event || !event.messageIds) return;
+    const ids = new Set(event.messageIds);
+    Object.values(conversations).forEach(list => {
+      (list || []).forEach(msg => {
+        if (ids.has(msg.id)) {
+          msg.status = event.status || msg.status;
+          if (typeof event.retryCount === 'number' && event.retryCount > 0) msg.retryCount = event.retryCount;
+        }
+      });
+    });
+
+    if (activeType === 'dm' && activeTarget && conversations[activeTarget]) {
+      renderMessages(conversations[activeTarget], false);
+    }
+  }
+
+  function notifyTyping() {
+    if (activeType !== 'dm' || !activeTarget || !stompConnected) return;
+    const now = Date.now();
+    if (now - typingSentAt < 700) return;
+    typingSentAt = now;
+    sendStompFrame('SEND', {
+      destination: '/app/typing',
+      'content-type': 'application/json'
+    }, JSON.stringify({ sender: ME, receiver: activeTarget, typing: true }));
+  }
+
+  function handleTypingEvent(event) {
+    if (!event || !event.typing || event.sender === ME) return;
+    if (activeType !== 'dm' || activeTarget !== event.sender) return;
+    showTypingIndicator(event.sender);
+  }
+
+  function showTypingIndicator(username) {
+    if (!typingIndicator) return;
+    typingIndicator.textContent = `${username} is typing...`;
+    typingIndicator.classList.remove('sc-hidden');
+    if (typingTimer) clearTimeout(typingTimer);
+    typingTimer = setTimeout(hideTypingIndicator, 2000);
+  }
+
+  function hideTypingIndicator() {
+    if (!typingIndicator) return;
+    typingIndicator.classList.add('sc-hidden');
+    typingIndicator.textContent = '';
+  }
+
   function openModal(id)  { document.getElementById(id).classList.remove('sc-hidden'); }
   function closeModal(id) { document.getElementById(id).classList.add('sc-hidden'); }
 
@@ -926,7 +1547,11 @@ if (isChat) {
 
   function handleUnauthorized() {
     stopPolling();
-    localStorage.clear();
+    disconnectRealtime();
+    localStorage.removeItem('sc_token');
+    localStorage.removeItem('sc_user');
+    localStorage.removeItem('sc_email');
+    localStorage.removeItem('sc_server_public_key');
     window.location.href = 'index.html';
   }
 
@@ -950,14 +1575,25 @@ if (isChat) {
   // ── Logout ─────────────────────────────────────────────────
   document.getElementById('logoutBtn').addEventListener('click', () => {
     stopPolling();
-    localStorage.clear();
+    disconnectRealtime();
+    localStorage.removeItem('sc_token');
+    localStorage.removeItem('sc_user');
+    localStorage.removeItem('sc_email');
+    localStorage.removeItem('sc_server_public_key');
     window.location.href = 'index.html';
   });
 
-  window.addEventListener('beforeunload', stopPolling);
+  window.addEventListener('beforeunload', () => {
+    stopPolling();
+    disconnectRealtime();
+  });
 }
-const username = localStorage.getItem("username");
+const username = localStorage.getItem("sc_user");
 
 if (username) {
     document.getElementById("current-user").innerText = username;
 }
+
+window.logout = function() {
+  document.getElementById('logoutBtn').click();
+};

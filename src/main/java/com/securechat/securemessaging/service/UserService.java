@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -138,6 +139,17 @@ public class UserService {
         User user = userRepository.findByUsername(username).orElse(null);
         if (user == null) throw new RuntimeException("User not found");
         return user.getPublicKey();
+    }
+
+    public User getUser(String username) {
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    public User updatePublicKey(String username, String publicKey) {
+        User user = getUser(username);
+        user.setPublicKey(java.util.Base64.getDecoder().decode(publicKey));
+        return userRepository.save(user);
     }
 
     public boolean userExists(String username) {

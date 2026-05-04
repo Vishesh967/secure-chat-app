@@ -5,17 +5,17 @@ import org.springframework.scheduling.annotation.Scheduled;
 import com.securechat.securemessaging.model.MessageStatus;
 import com.securechat.securemessaging.dto.ConversationPreview;
 import com.securechat.securemessaging.dto.MessageResponse;
+import com.securechat.securemessaging.dto.MessageStatusEvent;
 import com.securechat.securemessaging.model.Message;
 import com.securechat.securemessaging.repository.MessageRepository;
-import com.securechat.securemessaging.security.AESUtil;
 import com.securechat.securemessaging.security.HMACUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import com.securechat.securemessaging.service.PeerService;
 import com.securechat.securemessaging.model.TransportType;
 import com.securechat.securemessaging.repository.UserRepository;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -46,13 +46,46 @@ public class MessageService {
 
     public void markAsDelivered(int messageId) {
         Message msg = messageRepository.findById(messageId).orElse(null);
-        if (msg != null) {
+        if (msg != null && msg.getStatus() != MessageStatus.READ) {
             msg.setStatus(MessageStatus.DELIVERED);
-            messageRepository.save(msg);
+            Message saved = messageRepository.save(msg);
+            publishStatus(saved);
         }
     }
 
-    public MessageResponse sendMessage(String sender, String receiver, String content) {
+    public void markMessagesAsRead(String reader, List<Integer> messageIds) {
+        if (messageIds == null || messageIds.isEmpty()) {
+            return;
+        }
+
+        Map<String, List<Integer>> bySender = new HashMap<>();
+        for (Message msg : messageRepository.findAllById(messageIds)) {
+            if (!reader.equals(msg.getReceiver())) {
+                continue;
+            }
+            if (msg.getStatus() == MessageStatus.READ) {
+                continue;
+            }
+            msg.setStatus(MessageStatus.READ);
+            Message saved = messageRepository.save(msg);
+            bySender.computeIfAbsent(saved.getSender(), ignored -> new ArrayList<>())
+                    .add(saved.getId());
+        }
+
+        bySender.forEach((sender, ids) ->
+                messagingTemplate.convertAndSend(
+                        "/topic/message-status/" + sender,
+                        new MessageStatusEvent(ids, MessageStatus.READ, 0)));
+    }
+
+    public MessageResponse sendMessage(String sender,
+                                       String receiver,
+                                       String encryptedContent,
+                                       String nonce,
+                                       String senderPublicKey) {
+        if (encryptedContent == null || encryptedContent.isBlank()) {
+            throw new RuntimeException("Encrypted message content is required");
+        }
 
         Message message = new Message();
         message.setSender(sender);
@@ -77,24 +110,17 @@ public class MessageService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         try {
-            // Encrypt message
-            String encrypted = AESUtil.encrypt(content);
-            message.setContent(encrypted);
+            message.setContent(encryptedContent);
+            message.setNonce(resolveNonce(nonce));
+            if (senderPublicKey != null && !senderPublicKey.isBlank()) {
+                message.setSenderEphemeralPublicKey(senderPublicKey.getBytes(StandardCharsets.UTF_8));
+            }
 
-            // Generate unique nonce
-            String nonce;
-            do {
-                nonce = UUID.randomUUID().toString();
-            } while (messageRepository.existsByNonce(nonce));
-
-            message.setNonce(nonce);
-
-            // Generate HMAC for integrity
-            message.setHmac(HMACUtil.generateHMAC(encrypted, HMAC_KEY));
+            message.setHmac(HMACUtil.generateHMAC(encryptedContent, HMAC_KEY));
 
         } catch (Exception e) {
-            log.error("Encryption failed", e);
-            throw new RuntimeException("Encryption error");
+            log.error("Message persistence failed", e);
+            throw new RuntimeException("Failed to store encrypted message");
         }
 
         // Save to DB
@@ -103,10 +129,10 @@ public class MessageService {
         // Send real-time message (WebSocket)
         messagingTemplate.convertAndSend(
                 "/topic/messages/" + receiver,
-                toResponse(saved, content)   // sending plaintext for UI (correct in your flow)
+                toResponse(saved)
         );
 
-        return toResponse(saved, content);
+        return toResponse(saved);
     }
 
     @Scheduled(fixedDelay = 5000)
@@ -124,10 +150,12 @@ public class MessageService {
                 if (msg.getStatus() != MessageStatus.DELIVERED) {
                     msg.setStatus(MessageStatus.SENT);
                 }
-                messageRepository.save(msg);
+                Message saved = messageRepository.save(msg);
+                publishStatus(saved);
             } catch (Exception e) {
                 msg.setRetryCount(msg.getRetryCount() + 1);
-                messageRepository.save(msg);
+                Message saved = messageRepository.save(msg);
+                publishStatus(saved);
             }
         }
     }
@@ -143,35 +171,66 @@ public class MessageService {
         all.sort(Comparator.comparing(Message::getTimestamp));
 
         return all.stream()
-                .map(this::decryptAndMap)
+                .map(this::toResponse)
                 .collect(Collectors.toList());
     }
     public List<ConversationPreview> getDmPreviews(String user) {
-        return new ArrayList<>(); // temporary stub
-    }
-    private MessageResponse decryptAndMap(Message msg) {
-        try {
-            if (msg.getHmac() == null || msg.getNonce() == null) {
-                return toResponse(msg, msg.getContent());
-            }
+        Set<String> names = new HashSet<>();
+        names.addAll(messageRepository.findReceiversForSender(user));
+        names.addAll(messageRepository.findSendersForReceiver(user));
+        names.remove(user);
 
-            boolean valid = HMACUtil.verifyHMAC(msg.getContent(), HMAC_KEY, msg.getHmac());
-            if (!valid) {
-                return toResponse(msg, "[integrity check failed]");
-            }
-
-            String decrypted = AESUtil.decrypt(msg.getContent());
-
-            return toResponse(msg, decrypted);
-
-        } catch (Exception e) {
-            return toResponse(msg, "[decryption error]");
+        List<ConversationPreview> previews = new ArrayList<>();
+        for (String other : names) {
+            List<Message> side1 = messageRepository
+                    .findBySenderAndReceiverOrderByTimestampAsc(user, other);
+            List<Message> side2 = messageRepository
+                    .findBySenderAndReceiverOrderByTimestampAsc(other, user);
+            List<Message> all = new ArrayList<>(side1);
+            all.addAll(side2);
+            all.stream()
+                    .max(Comparator.comparing(Message::getTimestamp))
+                    .ifPresent(last -> previews.add(
+                            ConversationPreview.dm(other, "Encrypted message", last.getTimestamp())));
         }
+
+        previews.sort((a, b) -> {
+            if (a.getLastMessageTime() == null && b.getLastMessageTime() == null) return 0;
+            if (a.getLastMessageTime() == null) return 1;
+            if (b.getLastMessageTime() == null) return -1;
+            return b.getLastMessageTime().compareTo(a.getLastMessageTime());
+        });
+        return previews;
     }
 
-    private MessageResponse toResponse(Message msg, String content) {
+    private String resolveNonce(String requestedNonce) {
+        if (requestedNonce != null && !requestedNonce.isBlank()) {
+            if (messageRepository.existsByNonce(requestedNonce)) {
+                throw new RuntimeException("Duplicate message nonce");
+            }
+            return requestedNonce;
+        }
+
+        String nonce;
+        do {
+            nonce = UUID.randomUUID().toString();
+        } while (messageRepository.existsByNonce(nonce));
+        return nonce;
+    }
+
+    private void publishStatus(Message msg) {
+        messagingTemplate.convertAndSend(
+                "/topic/message-status/" + msg.getSender(),
+                new MessageStatusEvent(List.of(msg.getId()), msg.getStatus(), msg.getRetryCount()));
+    }
+
+    private MessageResponse toResponse(Message msg) {
+        String senderPublicKey = msg.getSenderEphemeralPublicKey() == null
+                ? null
+                : new String(msg.getSenderEphemeralPublicKey(), StandardCharsets.UTF_8);
         return new MessageResponse(
                 msg.getId(), msg.getSender(), msg.getReceiver(),
-                content, msg.getTimestamp());
+                msg.getContent(), msg.getNonce(), senderPublicKey,
+                msg.getStatus(), msg.getRetryCount(), msg.getTimestamp());
     }
 }

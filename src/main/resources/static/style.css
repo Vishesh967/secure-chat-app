@@ -291,7 +291,7 @@ body {
   padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 500;
 }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
-.topbar-user  { display: flex; align-items: center; gap: 10px; }
+.topbar-user  { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%;
   background: var(--green-600);
@@ -320,6 +320,8 @@ body {
   border-right: 1px solid var(--gray-300);
   display: flex; flex-direction: column;
   flex-shrink: 0; overflow: hidden;
+  position: relative;
+  padding-bottom: 112px;
 }
 
 .sidebar-search-wrap {
@@ -442,6 +444,8 @@ body {
   font-weight: 700; font-size: 0.95rem; color: var(--gray-900);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.clickable-name { cursor: pointer; }
+.clickable-name:hover { color: var(--green-800); }
 .chat-header-sub { font-size: 0.76rem; color: var(--green-600); }
 .chat-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -491,8 +495,22 @@ body {
   background: var(--white); color: var(--gray-900);
   border-bottom-left-radius: 4px; box-shadow: var(--shadow-sm);
 }
-.msg-time { font-size: 0.67rem; color: var(--gray-500); padding: 0 4px; }
-.msg-group.sent .msg-time { color: rgba(255,255,255,.55); }
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.67rem;
+  color: var(--gray-500);
+  padding: 0 4px;
+}
+.msg-time { font-size: inherit; color: inherit; }
+.msg-status-icon {
+  font-size: 0.68rem;
+  color: var(--gray-500);
+  transition: color var(--transition), opacity var(--transition);
+}
+.msg-status-icon.read { color: #1d9bf0; }
+.msg-status-icon.failed { color: var(--danger); font-weight: 700; }
 
 .date-divider {
   display: flex; align-items: center; gap: 10px;
@@ -503,6 +521,15 @@ body {
 }
 
 .msg-status { text-align: center; font-size: 0.82rem; color: var(--gray-500); padding: 12px; }
+
+.typing-indicator {
+  padding: 0 22px 8px;
+  min-height: 20px;
+  font-size: 0.78rem;
+  color: var(--green-800);
+  background: var(--gray-100);
+  transition: opacity var(--transition);
+}
 
 /* Composer */
 .message-composer {
@@ -587,6 +614,55 @@ body {
   cursor: pointer; transition: background var(--transition);
 }
 .btn-modal-ok:hover { background: var(--green-900); }
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.profile-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--green-600);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.profile-main { min-width: 0; }
+.profile-name { font-weight: 800; color: var(--gray-900); }
+.profile-email {
+  margin-top: 2px;
+  color: var(--gray-500);
+  font-size: 0.86rem;
+  word-break: break-word;
+}
+
+.profile-key-wrap label {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--gray-500);
+  margin-bottom: 6px;
+}
+
+.profile-key {
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--gray-100);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-size: 0.72rem;
+  color: var(--gray-700);
+}
 
 /* Member chips */
 .members-chip-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -714,6 +790,69 @@ body {
 a.btn-modal-ok {
   text-decoration: none;
   display: flex; align-items: center; justify-content: center;
+}
+
+.lan-panel {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  background: #e8f5e9;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+  color: #1b5e20;
+}
+
+.lan-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.lan-dot {
+  width: 8px;
+  height: 8px;
+  background: #4caf50;
+  border-radius: 50%;
+}
+
+.lan-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.lan-green-dot {
+  width: 8px;
+  height: 8px;
+  background: #4caf50;
+  border-radius: 50%;
+}
+
+.lan-url-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #c8e6c9;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.lan-url-box button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.lan-help {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #2e7d32;
 }
 
 

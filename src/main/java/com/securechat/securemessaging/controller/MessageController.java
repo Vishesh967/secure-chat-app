@@ -1,6 +1,7 @@
 package com.securechat.securemessaging.controller;
 
 import com.securechat.securemessaging.dto.ConversationPreview;
+import com.securechat.securemessaging.dto.MessageReadRequest;
 import com.securechat.securemessaging.dto.MessageResponse;
 import com.securechat.securemessaging.dto.SendMessageRequest;
 import com.securechat.securemessaging.service.MessageService;
@@ -28,11 +29,25 @@ public class MessageController {
             @Valid @RequestBody SendMessageRequest request) {
 
         return ResponseEntity.ok(
-                messageService.sendMessage(sender, request.getReceiver(), request.getContent()));
+                messageService.sendMessage(
+                        sender,
+                        request.getReceiver(),
+                        request.getEncryptedContent(),
+                        request.getNonce(),
+                        request.getSenderPublicKey()));
     }
     @PostMapping("/ack")
     public ResponseEntity<Void> ackMessage(@RequestParam int messageId) {
         messageService.markAsDelivered(messageId);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/read")
+    public ResponseEntity<Void> markRead(
+            @AuthenticationPrincipal String currentUser,
+            @RequestBody MessageReadRequest request) {
+
+        messageService.markMessagesAsRead(currentUser, request.getMessageIds());
         return ResponseEntity.ok().build();
     }
 

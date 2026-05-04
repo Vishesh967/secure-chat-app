@@ -84,7 +84,7 @@ public class GroupController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Send an encrypted message to a group. */
+    /** Store an already encrypted message for a group. */
     @PostMapping("/{groupId}/messages")
     public ResponseEntity<GroupMessageResponse> sendMessage(
             @AuthenticationPrincipal String sender,
@@ -92,10 +92,10 @@ public class GroupController {
             @Valid @RequestBody GroupMessageRequest request) {
 
         return ResponseEntity.ok(
-                groupService.sendMessage(groupId, sender, request.getContent()));
+                groupService.sendMessage(groupId, sender, request.getContent(), request.getNonce()));
     }
 
-    /** Fetch all messages for a group (decrypted). */
+    /** Fetch all encrypted messages for a group. */
     @GetMapping("/{groupId}/messages")
     public ResponseEntity<List<GroupMessageResponse>> getMessages(
             @AuthenticationPrincipal String username,
