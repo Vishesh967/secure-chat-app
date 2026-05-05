@@ -15,9 +15,9 @@ public class LanInfoResponse {
     public LanInfoResponse(String lanIp, int port) {
         this.lanIp         = lanIp;
         this.port          = port;
-        this.lanUrl        = "http://" + lanIp + ":" + port;
+        this.lanUrl        = "https://" + lanIp + ":" + port;
         this.discoveryPort = LanDiscoveryService.DISCOVERY_PORT;
-        this.mode          = lanIp.startsWith("127.") ? "LOCALHOST" : "LAN";
+        this.mode          = (lanIp.equals("localhost") || lanIp.startsWith("127.")) ? "LOCALHOST" : "LAN";
     }
 
     public String getLanIp()        { return lanIp; }
