@@ -59,32 +59,27 @@ async function setupLanPanel() {
 
   if (!ipText || !urlEl) return;
 
-  const host = window.location.hostname;
-  const port = window.location.port ? `:${window.location.port}` : '';
-  const lanUrl = `${window.location.protocol}//${host}${port}`;
-  
-  urlEl.innerText = lanUrl;
+  try {
+    const res = await fetch('/lan/info');
+    if (!res.ok) throw new Error('Failed to fetch LAN info');
+    const data = await res.json();
 
-  let mode = "INTERNET";
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
-    mode = "LOCAL";
-  } else if (/^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) {
-    mode = "LAN";
+    const lanUrl = data.lanUrl || window.location.origin;
+    const mode   = data.mode === "LAN" ? "LAN" : "LOCAL";
+
+    urlEl.innerText = lanUrl;
+    if (labelEl) labelEl.innerText = mode;
+
+    ipText.innerText = mode === "LAN"
+      ? "On LAN - " + (data.lanIp || "")
+      : "LOCAL - " + (data.lanIp || "localhost");
+
+    document.getElementById("copyLanUrl").onclick = () => {
+      navigator.clipboard.writeText(lanUrl);
+    };
+  } catch (error) {
+    console.error("Failed to fetch LAN info:", error);
   }
-
-  if (labelEl) labelEl.innerText = mode;
-
-  if (mode === "LOCAL") {
-    ipText.innerText = "LOCAL - " + host;
-  } else if (mode === "LAN") {
-    ipText.innerText = "On LAN - " + host;
-  } else {
-    ipText.innerText = "INTERNET - " + host;
-  }
-
-  document.getElementById("copyLanUrl").onclick = () => {
-    navigator.clipboard.writeText(lanUrl);
-  };
 }
 
 const path    = window.location.pathname;
