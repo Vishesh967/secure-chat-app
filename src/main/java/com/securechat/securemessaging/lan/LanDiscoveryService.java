@@ -126,26 +126,27 @@ public class LanDiscoveryService {
 
     private String detectLanIp() {
         try {
-            // Prefer the IP that can reach the internet (or LAN gateway)
-            try (DatagramSocket s = new DatagramSocket()) {
-                s.connect(InetAddress.getByName("8.8.8.8"), 80);
-                return s.getLocalAddress().getHostAddress();
-            }
-        } catch (Exception ignored) {}
-
-        // Fallback: iterate network interfaces
-        try {
             for (NetworkInterface ni : java.util.Collections.list(NetworkInterface.getNetworkInterfaces())) {
                 if (ni.isLoopback() || !ni.isUp()) continue;
+                
+                String name = (ni.getDisplayName() + ni.getName()).toLowerCase();
+                if (name.contains("virtual") || name.contains("vmware") || name.contains("vbox") ||
+                    name.contains("vpn") || name.contains("tap") || name.contains("tun") || name.contains("wsl")) {
+                    continue;
+                }
+
                 for (InetAddress addr : java.util.Collections.list(ni.getInetAddresses())) {
                     if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
-                        return addr.getHostAddress();
+                        String ip = addr.getHostAddress();
+                        if (ip.startsWith("192.168.") || ip.startsWith("172.20.") || ip.startsWith("10.")) {
+                            return ip;
+                        }
                     }
                 }
             }
         } catch (Exception ignored) {}
 
-        return "127.0.0.1";
+        return "localhost";
     }
 
     private String getSubnetBroadcast(String ip) {
