@@ -59,38 +59,31 @@ async function setupLanPanel() {
 
   if (!ipText || !urlEl) return;
 
-  let lanIp = window.location.hostname;
-  try {
-    const res = await fetch(`${BASE_URL || window.location.origin}/users/lan-ip`);
-    if (res.ok) {
-        const data = await res.json();
-        if (data.ip) lanIp = data.ip;
-    }
-  } catch (e) {}
-
-  let port = window.location.port ? `:${window.location.port}` : '';
-  let url = `${window.location.protocol}//${lanIp}${port}`;
-  urlEl.innerText = url;
+  const host = window.location.hostname;
+  const port = window.location.port ? `:${window.location.port}` : '';
+  const lanUrl = `${window.location.protocol}//${host}${port}`;
+  
+  urlEl.innerText = lanUrl;
 
   let mode = "INTERNET";
-  if (lanIp === "localhost" || lanIp === "127.0.0.1" || lanIp === "::1") {
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
     mode = "LOCAL";
-  } else if (/^192\.168\./.test(lanIp) || /^10\./.test(lanIp) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(lanIp)) {
+  } else if (/^192\.168\./.test(host) || /^10\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) {
     mode = "LAN";
   }
 
   if (labelEl) labelEl.innerText = mode;
 
   if (mode === "LOCAL") {
-    ipText.innerText = "LOCAL - " + lanIp;
+    ipText.innerText = "LOCAL - " + host;
   } else if (mode === "LAN") {
-    ipText.innerText = "On LAN - " + lanIp;
+    ipText.innerText = "On LAN - " + host;
   } else {
-    ipText.innerText = "INTERNET - " + lanIp;
+    ipText.innerText = "INTERNET - " + host;
   }
 
   document.getElementById("copyLanUrl").onclick = () => {
-    navigator.clipboard.writeText(url);
+    navigator.clipboard.writeText(lanUrl);
   };
 }
 
@@ -849,7 +842,6 @@ if (isChat) {
     }
   }
 
-  // ── Open Group ─────────────────────────────────────────────
   async function openGroup(group) {
     stopPolling();
     activeType     = 'group';
@@ -951,13 +943,18 @@ if (isChat) {
     const atBottom = isScrolledToBottom();
     messagesArea.innerHTML = '';
 
-    if (!messages || messages.length === 0) {
+    const validMessages = (messages || []).filter(msg => {
+      if (msg.messageType === 'IMAGE') return !!msg.decryptedDataUrl;
+      return msg.content !== '[Encrypted message unavailable on this device]';
+    });
+
+    if (validMessages.length === 0) {
       messagesArea.innerHTML = '<div class="msg-status">No messages yet — say hello!</div>';
       return;
     }
 
     let lastDate = null;
-    messages.forEach(msg => {
+    validMessages.forEach(msg => {
       const d = formatDate(msg.timestamp);
       if (d !== lastDate) {
         const div = document.createElement('div');
