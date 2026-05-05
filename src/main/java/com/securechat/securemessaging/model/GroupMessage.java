@@ -18,13 +18,14 @@ public class GroupMessage {
     private String sender;
 
     @Lob
-    @Column(nullable = false)
+    @Column(columnDefinition = "LONGTEXT", nullable = false)
     private String content;
 
-    @Column(nullable = false)
+    @Lob
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String hmac;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, unique = true, length = 512)
     private String nonce;
 
     @Column(nullable = false, updatable = false)
